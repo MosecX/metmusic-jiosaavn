@@ -95,7 +95,7 @@ void main() async {
         : await AudioService.init(
             builder: () => handlerInstance,
             config: const AudioServiceConfig(
-              androidNotificationChannelId: 'com.metmusic.app.channel.audio',
+              androidNotificationChannelId: 'com.metmusic.jiosaavn.channel.audio',
               androidNotificationChannelName: 'Audio playback',
               androidNotificationOngoing: true,
               androidNotificationIcon: 'mipmap/launcher_icon',

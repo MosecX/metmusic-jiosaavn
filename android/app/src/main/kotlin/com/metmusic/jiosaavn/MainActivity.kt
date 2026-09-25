@@ -1,4 +1,4 @@
-package com.metmusic.app
+package com.metmusic.jiosaavn
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -93,13 +93,7 @@ Future<List<TursoResult>> tursoExecute(
           'type': 'execute',
           'stmt': {
             'sql': s.sql,
-            'args': [
-              for (final a in s.args)
-                {
-                  'type': _argType(a),
-                  'value': _argValue(a),
-                },
-            ],
+            'args': [for (final a in s.args) _argToHrana(a)],
           },
         },
       {'type': 'close'},
@@ -181,17 +175,18 @@ Future<Response<dynamic>> _post(TursoClient client, Map<String, dynamic> body) {
   return client._dio.post(tursoApiUrl(client.url), data: body);
 }
 
-String _argType(dynamic v) {
-  if (v == null) return 'null';
-  if (v is int) return 'integer';
-  if (v is bool) return v ? 'integer' : 'integer';
-  if (v is num) return 'real';
-  return 'text';
-}
-
-dynamic _argValue(dynamic v) {
-  if (v == null) return null;
-  if (v is bool) return v ? 1 : 0;
-  if (v is DateTime) return v.toIso8601String();
-  return v;
+/// Encodes a Dart value as a Hrana v2 arg.
+///
+/// Quirks verified against the Turso platform API:
+/// * `integer` values must be JSON **strings** — a JSON number fails with
+///   400 "invalid type: integer `5`, expected a borrowed string".
+/// * `real` values are JSON numbers.
+/// * `null` takes no value field.
+Map<String, dynamic> _argToHrana(dynamic v) {
+  if (v == null) return {'type': 'null'};
+  if (v is int) return {'type': 'integer', 'value': v.toString()};
+  if (v is bool) return {'type': 'integer', 'value': v ? '1' : '0'};
+  if (v is num) return {'type': 'real', 'value': v};
+  if (v is DateTime) return {'type': 'text', 'value': v.toIso8601String()};
+  return {'type': 'text', 'value': v.toString()};
 }

@@ -1,5 +1,5 @@
 name: metmusic_jiosaavn
-description: "MetMusic JioSaavn - Pure JioSaavn music streaming app."
+description: "MetMusic - JioSaavn: pure JioSaavn music streaming app."
 publish_to: 'none'
 # Incremented Android versionCode so this release can replace earlier builds.
 version: 1.0.0
@@ -23,9 +23,7 @@ dependencies:
 
   # Audio Playback
   # - media_kit is the primary engine (libmpv) for standard streams.
-  # - just_audio is used directly (not as a media_kit wrapper) for
-  #   ProgressiveStreamSource / DASH sources in audio_handler.dart and
-  #   dash_stream_audio_source.dart.
+  # - just_audio drives playback through the media_kit backend.
   media_kit: ^1.2.6
   media_kit_libs_audio: ^1.0.7
   just_audio: ^0.10.5
@@ -39,9 +37,6 @@ dependencies:
   wakelock_plus: ^1.2.8
 
 
-
-  # YouTube (Metadata Extraction + Direct Playback)
-  youtube_explode_dart: ^3.1.0
 
   # Local Storage
   # hive_ce is the single maintained Hive line used on both native and web

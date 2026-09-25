@@ -259,7 +259,7 @@ class AddonService extends ChangeNotifier {
 
   /// Resolve a full stream result (url + metadata) for a track.
   Future<AddonStreamResult?> getStreamResult(String trackId,
-      {String? addonId, bool atmos = false}) async {
+      {String? addonId}) async {
     final id = addonId ?? _activeAddonId;
     if (id == null) return null;
 
@@ -267,15 +267,14 @@ class AddonService extends ChangeNotifier {
     if (manifest == null) return null;
 
     if (manifest.addonType == AddonType.user) {
-      return await _userHandlers[id]?.getStreamResult(trackId, atmos: atmos);
+      return await _userHandlers[id]?.getStreamResult(trackId);
     } else {
-      return _serverGetStreamResult(manifest, trackId, atmos: atmos);
+      return _serverGetStreamResult(manifest, trackId);
     }
   }
 
   Future<AddonStreamResult?> _serverGetStreamResult(
-      AddonManifest manifest, String trackId,
-      {bool atmos = false}) async {
+      AddonManifest manifest, String trackId) async {
     try {
       final response =
           await _dio.get('${manifest.baseUrl}/stream/$trackId');
@@ -356,66 +355,6 @@ class AddonService extends ChangeNotifier {
       }
     } catch (e) {
       print('[AddonService] Playlist detail error: $e');
-    }
-    return null;
-  }
-
-
-  Future<AddonMix?> getMixDetail(String mixId, {String? addonId}) async {
-    // Candidate addon ids, in priority order: the one passed, the active
-    // addon, then every installed server addon. This makes the call resilient
-    // to a missing/incorrect addonId (e.g. the 'com.tidal.hifi' fallback used
-    // when a track has no addonId) which previously returned null silently.
-    final candidates = <String>[];
-    if (addonId != null && addonId.isNotEmpty) candidates.add(addonId);
-    if (_activeAddonId != null) candidates.add(_activeAddonId!);
-    candidates.addAll(
-        _installedAddons.where((a) => a.addonType == AddonType.server).map((a) => a.id));
-    final seen = <String>{};
-    candidates.retainWhere((e) => seen.add(e));
-
-    String? lastError;
-    for (final cid in candidates) {
-      final manifest = _getManifest(cid);
-      if (manifest == null) continue;
-
-      if (manifest.addonType == AddonType.user) {
-        try {
-          final m = await _userHandlers[cid]?.getMixDetail(mixId);
-          if (m != null) return m;
-        } catch (e) {
-          lastError = e.toString();
-        }
-        continue;
-      }
-
-      // Try both common endpoint shapes; the backend may expose /mix/{id}
-      // or /mixes/{id}.
-      for (final path in ['/mixes/$mixId', '/mix/$mixId']) {
-        try {
-          final response = await _dio.get('${manifest.baseUrl}$path');
-          if (response.statusCode == 200 && response.data != null) {
-            final data = _toMap(response.data);
-            // The API returns { "mix": {...}, "tracks": [...] } — tracks live
-            // at the top level, sibling to "mix", so merge them in.
-            final Map<String, dynamic> mixMap = data['mix'] is Map
-                ? Map<String, dynamic>.from(data['mix'])
-                : Map<String, dynamic>.from(data);
-            if (data['mix'] is Map && data['tracks'] is List) {
-              mixMap['tracks'] = data['tracks'];
-            }
-            final mix = AddonMix.fromJson(mixMap, addonId: cid);
-            // Accept as long as it resolved to something usable.
-            if (mix.id.isNotEmpty || mix.tracks != null) return mix;
-          }
-        } catch (e) {
-          lastError = e.toString();
-        }
-      }
-    }
-
-    if (lastError != null) {
-      throw Exception('No se pudo cargar el mix: $lastError');
     }
     return null;
   }

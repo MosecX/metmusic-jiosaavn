@@ -16,8 +16,6 @@ import 'core/services/download_manager_service.dart';
 import 'core/services/discord_rpc_service.dart';
 import 'core/services/account_service.dart';
 import 'core/services/connectivity_service.dart';
-import 'core/services/youtube_service.dart';
-import 'core/services/spotify_service.dart';
 import 'core/services/jiosaavn_service.dart';
 
 import 'features/app_shell.dart';
@@ -26,7 +24,7 @@ import 'core/services/history_service.dart';
 import 'core/services/import_service.dart';
 import 'core/services/addon_service.dart';
 import 'core/services/lrclib_addon_handler.dart';
-import 'core/services/tidal_addon_handler.dart';
+import 'core/services/jiosaavn_addon_handler.dart';
 import 'core/services/local_library_service.dart';
 import 'core/services/navigation_service.dart';
 import 'core/utils/platform_helper.dart';
@@ -68,31 +66,29 @@ void main() async {
     final localLibraryService = LocalLibraryService();
     await localLibraryService.init();
 
+    // JioSaavn playback + catalog (the single provider in this app).
+    final jioSaavnService = JioSaavnService();
+
     final addonService = AddonService(settingsService: settingsService);
     
     final lrcLibHandler = LrcLibAddonHandler();
     addonService.registerUserHandler('net.lrclib', lrcLibHandler);
 
-    final tidalHandler = TidalAddonHandler(settingsService: settingsService);
-    addonService.registerUserHandler('com.tidal.hifi', tidalHandler);
+    final jioSaavnAddon = JioSaavnAddonHandler(jioSaavnService: jioSaavnService);
+    addonService.registerUserHandler(JioSaavnAddonHandler.addonId, jioSaavnAddon);
 
     await addonService.initAddons();
 
-    // Make Tidal the active search provider by default
+    // Make JioSaavn the active search provider by default
     if (addonService.activeAddonId == null) {
-      await addonService.setActiveAddon('com.tidal.hifi');
+      await addonService.setActiveAddon(JioSaavnAddonHandler.addonId);
     }
-
-    // JioSaavn playback source (used when selected in Settings).
-    final jioSaavnService = JioSaavnService();
 
     // 3. Audio Handler (Background)
     final handlerInstance = AppAudioHandler(
       downloadManager: downloadManager,
       addonService: addonService,
-      settings: settingsService,
     );
-    handlerInstance.attachJioSaavn(jioSaavnService);
 
     final audioHandler = kIsWeb
         ? handlerInstance
@@ -109,13 +105,10 @@ void main() async {
     final discordRpcService = DiscordRpcService();
     discordRpcService.initialize();
 
-    final youtubeService = YouTubeService();
-    final spotifyService = SpotifyService();
     final accountService = AccountService(settingsService: settingsService);
     await accountService.init();
 
-    final connectivityService = ConnectivityService(
-        settingsService: settingsService);
+    final connectivityService = ConnectivityService();
     await connectivityService.start();
 
     // 4. UI Audio Service
@@ -157,8 +150,6 @@ void main() async {
           ChangeNotifierProvider.value(value: connectivityService),
           ChangeNotifierProvider.value(value: navigationService),
           Provider.value(value: discordRpcService),
-          Provider.value(value: youtubeService),
-          Provider.value(value: spotifyService),
           Provider.value(value: jioSaavnService),
         ],
         child: const MetMusicApp(),
@@ -180,7 +171,7 @@ class MetMusicApp extends StatelessWidget {
         : ThemeMode.light;
 
     return MaterialApp(
-      title: 'MetMusic',
+      title: 'MetMusic - JioSaavn',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,

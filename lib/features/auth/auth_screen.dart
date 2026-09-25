@@ -105,7 +105,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   ),
                   const SizedBox(height: 20),
                   Text(
-                    'MetMusic',
+                    'MetMusic - JioSaavn',
                     textAlign: TextAlign.center,
                     style: text.displayMedium?.copyWith(
                       fontWeight: FontWeight.w900,

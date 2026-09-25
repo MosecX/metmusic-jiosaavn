@@ -4,20 +4,17 @@ import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/models.dart';
 import '../../core/services/addon_service.dart';
-import '../../core/services/settings_service.dart';
 
 /// Quality Badge — Hostinger Design System
-/// Shows Hi-Res, Lossless, Dolby Atmos badges
+/// Shows Hi-Res / quality badges (JioSaavn delivers up to 320 kbps AAC).
 class QualityBadge extends StatefulWidget {
   final Track? track;
   final String? qualityOverride;
-  final bool shortAtmos;
 
   const QualityBadge({
     super.key,
     required this.track,
     this.qualityOverride,
-    this.shortAtmos = false,
   });
 
   factory QualityBadge.fromQuality({
@@ -113,17 +110,6 @@ class _QualityBadgeState extends State<QualityBadge> {
   @override
   Widget build(BuildContext context) {
     final quality = _quality;
-    final raw = widget.track?.rawData ?? {};
-    final modes = raw['audioModes'];
-    final isAtmos =
-        modes is List && modes.any((e) => e.toString().contains('ATMOS'));
-
-    if (isAtmos) {
-      return _HostingerBadge(
-        label: widget.shortAtmos ? 'Atmos' : 'Dolby Atmos',
-        style: _BadgeStyle.atmos,
-      );
-    }
 
     if (quality == null || quality.isEmpty) return const SizedBox.shrink();
 
@@ -138,12 +124,6 @@ class _QualityBadgeState extends State<QualityBadge> {
       return _HostingerBadge(
         label: 'Lossless',
         style: _BadgeStyle.lossless,
-      );
-    }
-    if (upper.contains('ATMOS')) {
-      return _HostingerBadge(
-        label: widget.shortAtmos ? 'Atmos' : 'Dolby Atmos',
-        style: _BadgeStyle.atmos,
       );
     }
     return _HostingerBadge(
@@ -173,12 +153,8 @@ class _HostingerBadge extends StatelessWidget {
         // Hi-Res: Yellow/Amber
         bg = const Color(0xFFFACC15);
         fg = AppTheme.surface;
-      case _BadgeStyle.atmos:
-        // Atmos: Hostinger accent purple
-        bg = AppTheme.accent;
-        fg = AppTheme.surface;
       case _BadgeStyle.lossless:
-        // Lossless: subtle dark pill
+        // Subtle dark pill
         bg = AppTheme.surface3;
         fg = AppTheme.textMuted;
     }
@@ -206,4 +182,4 @@ class _HostingerBadge extends StatelessWidget {
   }
 }
 
-enum _BadgeStyle { hires, atmos, lossless }
+enum _BadgeStyle { hires, lossless }

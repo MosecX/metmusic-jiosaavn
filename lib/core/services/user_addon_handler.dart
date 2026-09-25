@@ -19,7 +19,7 @@ abstract class UserAddonHandler {
 
   /// Resolve a playable stream URL for the given track ID.
   /// Returns null if resolution fails.
-  Future<AddonStreamResult?> getStreamResult(String trackId, {bool atmos = false});
+  Future<AddonStreamResult?> getStreamResult(String trackId);
 
   /// Fetch full album detail (tracks list). Returns null if not supported.
   Future<AddonAlbum?> getAlbumDetail(String albumId) async => null;
@@ -29,9 +29,6 @@ abstract class UserAddonHandler {
 
   /// Fetch full playlist detail (tracks list). Returns null if not supported.
   Future<AddonPlaylist?> getPlaylistDetail(String playlistId) async => null;
-
-  /// Fetch full mix detail (tracks list). Returns null if not supported.
-  Future<AddonMix?> getMixDetail(String mixId) async => null;
 
   /// Fetch recommended tracks based on a seed track id. Empty list if unsupported.
   Future<List<AddonTrack>> getRecommendations(String seedTrackId, {int limit = 24}) async => [];

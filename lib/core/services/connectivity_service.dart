@@ -4,10 +4,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import 'settings_service.dart';
+import 'jiosaavn_service.dart';
 
 class ConnectivityService extends ChangeNotifier {
-  final SettingsService _settings;
   final Dio _dio;
 
   bool _hasNetwork = true;
@@ -17,9 +16,8 @@ class ConnectivityService extends ChangeNotifier {
   StreamSubscription<List<ConnectivityResult>>? _sub;
   List<ConnectivityResult> _results = [];
 
-  ConnectivityService({required SettingsService settingsService})
-      : _settings = settingsService,
-        _dio = Dio(BaseOptions(
+  ConnectivityService()
+      : _dio = Dio(BaseOptions(
           connectTimeout: const Duration(seconds: 5),
           receiveTimeout: const Duration(seconds: 5),
           sendTimeout: const Duration(seconds: 5),
@@ -33,12 +31,12 @@ class ConnectivityService extends ChangeNotifier {
   /// True only when the device genuinely has an internet connection (a real
   /// network interface is up).
   ///
-  /// This deliberately does NOT depend on [canReachApi]: playback streams
-  /// come from YouTube and must not be gated by the backend's health. The
-  /// Tidal/Supabase API is often down (e.g. HTTP 540 CORS failures), which
-  /// previously made the app report "no internet" and blocked every track
-  /// even though the network worked fine. API reachability is shown as an
-  /// informational indicator in Settings.
+  /// This deliberately does NOT depend on [canReachApi]: playback streams come
+  /// from the JioSaavn CDN and must not be gated by the API proxy's health.
+  /// The JioSaavn API proxy can occasionally be slow/down, which previously
+  /// made the app report "no internet" and blocked every track even though the
+  /// network worked fine. API reachability is shown as an informational
+  /// indicator in Settings.
   bool get isOnline => _hasNetwork;
 
   /// Human-readable label of the active connection (Wi-Fi, mobile data, ...).
@@ -123,10 +121,9 @@ class ConnectivityService extends ChangeNotifier {
     if (!_hasNetwork) return;
     _checking = true;
     try {
-      // Probe the backend's health endpoint (CORS-enabled) instead of the
-      // bare host root, which fails CORS checks in the browser and wrongly
-      // reports the API as unreachable.
-      final healthUrl = '${_settings.tidalApiBase}/health';
+      // Probe the JioSaavn API proxy root (CORS-friendly status payload)
+      // instead of hitting a catalog endpoint that may 4xx on health checks.
+      final healthUrl = JioSaavnService.apiBase;
       final res = await _dio.get(healthUrl);
       _setReachable(res.statusCode != null);
     } catch (_) {

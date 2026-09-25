@@ -15,10 +15,10 @@ import '../downloads/downloads_screen.dart';
 import '../auth/auth_screen.dart';
 import '../album/album_detail_screen.dart';
 import '../artist/artist_detail_screen.dart';
-import '../mix/mix_screen.dart';
 import '../../core/utils/app_toast.dart';
+import '../../core/services/jiosaavn_addon_handler.dart';
 
-const String _kAddonId = 'com.tidal.hifi';
+const String _kAddonId = JioSaavnAddonHandler.addonId;
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
@@ -90,7 +90,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           child: _selectedPlaylist != null
               ? _buildPlaylistDetail()
               : DefaultTabController(
-                  length: 6,
+                  length: 5,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -126,7 +126,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           Tab(text: 'Canciones'),
                           Tab(text: 'Álbumes'),
                           Tab(text: 'Artistas'),
-                          Tab(text: 'Mixes'),
                           Tab(text: 'Descargas'),
                         ],
                       ),
@@ -137,7 +136,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             _buildLikedSongs(),
                             _buildAlbums(),
                             _buildArtists(),
-                            _buildMixes(),
                             const DownloadsScreen(),
                           ],
                         ),
@@ -243,38 +241,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
       items: artists,
       onTap: (row) => Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => ArtistDetailScreen(
-          id: row.itemId,
-          addonId: _kAddonId,
-          initialTitle: _titleOf(row.data, row.itemId),
-          initialArtwork: coverUrlFromUuid(_coverOf(row.data)),
-        ),
-      )),
-    );
-  }
-
-  // ========== MIXES ==========
-
-  Widget _buildMixes() {
-    final account = context.watch<AccountService>();
-    if (!account.isLoggedIn) {
-      return _centeredMessage(
-        icon: Icons.gradient_rounded,
-        text: 'Inicia sesión para ver tus mixes favoritos',
-        actionLabel: 'Iniciar sesión',
-        onAction: () => _openAuth(),
-      );
-    }
-    final mixes = account.favoriteMixes;
-    if (mixes.isEmpty) {
-      return _centeredMessage(
-        icon: Icons.gradient_rounded,
-        text: 'Aún no tienes mixes favoritos.',
-      );
-    }
-    return _FavGrid(
-      items: mixes,
-      onTap: (row) => Navigator.of(context).push(MaterialPageRoute(
-        builder: (_) => MixScreen(
           id: row.itemId,
           addonId: _kAddonId,
           initialTitle: _titleOf(row.data, row.itemId),
@@ -862,19 +828,13 @@ class _FavCoverState extends State<_FavCover> {
 
   Future<void> _fetchFallback() async {
     final type = widget.row.itemType;
-    if (type != 'artist' && type != 'mix') return;
-    final addonId = widget.row.data['addonId']?.toString() ?? 'com.tidal.hifi';
+    if (type != 'artist') return;
+    final addonId = widget.row.data['addonId']?.toString() ?? _kAddonId;
     String? artwork;
     try {
-      if (type == 'artist') {
-        final a = await widget.addonService.getArtistDetail(widget.row.itemId,
-            addonId: addonId);
-        artwork = a?.artworkURL;
-      } else {
-        final m = await widget.addonService.getMixDetail(widget.row.itemId,
-            addonId: addonId);
-        artwork = m?.artworkURL;
-      }
+      final a = await widget.addonService
+          .getArtistDetail(widget.row.itemId, addonId: addonId);
+      artwork = a?.artworkURL;
     } catch (e) {
       print('[FavCover] fallback fetch failed: $e');
     }

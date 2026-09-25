@@ -3,7 +3,6 @@ import 'package:audio_service/audio_service.dart';
 import 'dart:async';
 
 import '../models/models.dart';
-import '../utils/platform_helper.dart';
 import 'addon_service.dart';
 import 'account_service.dart';
 import 'audio_handler.dart';
@@ -12,7 +11,6 @@ import 'connectivity_service.dart';
 import 'download_manager_service.dart';
 
 import 'discord_rpc_service.dart';
-
 class AudioPlayerService with ChangeNotifier {
   final AppAudioHandler _handler;
   final AddonService _addonService;
@@ -41,7 +39,6 @@ class AudioPlayerService with ChangeNotifier {
   bool _isLoadingTrack = false;
   String? _loadingTrackId;
   String? _lastPlaybackError;
-  String? _playbackNotice;
 
   // Getters
   List<Track> get queue => _queue;
@@ -64,15 +61,6 @@ class AudioPlayerService with ChangeNotifier {
   bool get isLoadingTrack => _isLoadingTrack;
   String? get loadingTrackId => _loadingTrackId;
   String? get lastPlaybackError => _lastPlaybackError;
-
-  /// Info shown in the player when playback fell back to another source
-  /// (e.g. Tidal → JioSaavn). Mirrors [AppAudioHandler.playbackNotice].
-  String? get playbackNotice => _playbackNotice;
-
-  void clearLastPlaybackNotice() {
-    _playbackNotice = null;
-    notifyListeners();
-  }
 
   void clearLastPlaybackError() {
     _lastPlaybackError = null;
@@ -208,12 +196,6 @@ class AudioPlayerService with ChangeNotifier {
       }
     });
 
-    _playbackNotice = _handler.playbackNotice.value;
-    _handler.playbackNotice.addListener(() {
-      _playbackNotice = _handler.playbackNotice.value;
-      notifyListeners();
-    });
-
     // Listen to Queue
     _handler.queue.listen((items) {
       _queue = items.map((item) {
@@ -278,21 +260,7 @@ class AudioPlayerService with ChangeNotifier {
     return _queue[index];
   }
 
-  /// Dolby Atmos playback causes severe lag/crashes on desktop (libmpv on
-  /// Windows/Linux can't decode Atmos). Block it there and let the UI know.
-  static bool get _isDesktop =>
-      PlatformHelper.isWindows || PlatformHelper.isLinux || PlatformHelper.isMacOS;
-
-  bool _atmosBlockedToastShown = false;
-
   Future<void> playTrack(Track track) async {
-    if (_isDesktop && track.isAtmos) {
-      if (!_atmosBlockedToastShown) {
-        _atmosBlockedToastShown = true;
-        debugPrint('[AudioPlayer] Dolby Atmos no soportado en PC — reproducción omitida');
-      }
-      return;
-    }
     if (!await _ensurePlayAccess()) return;
     if (!await _ensureOfflineTrack(track)) return;
     await _handler.setRequestQueue([track]);
@@ -306,27 +274,6 @@ class AudioPlayerService with ChangeNotifier {
   Future<void> playAll(List<Track> tracks, {int startIndex = 0}) async {
     if (!await _ensurePlayAccess()) return;
     var queue = tracks;
-    // On desktop, filter out Atmos tracks to prevent lag/crashes
-    if (_isDesktop) {
-      final before = queue.length;
-      queue = queue.where((t) => !t.isAtmos).toList();
-      if (queue.length < before && !_atmosBlockedToastShown) {
-        _atmosBlockedToastShown = true;
-        debugPrint('[AudioPlayer] Dolby Atmos omitido en PC (${before - queue.length} canciones filtradas)');
-      }
-      if (queue.isEmpty) return;
-      if (startIndex > 0) {
-        int newIndex = 0;
-        int count = 0;
-        for (int i = 0; i < tracks.length && count < startIndex; i++) {
-          if (!tracks[i].isAtmos) {
-            count++;
-            newIndex = count;
-          }
-        }
-        startIndex = newIndex.clamp(0, queue.length - 1);
-      }
-    }
     if (!_connectivityService.isOnline) {
       queue = queue.where(_trackPlayable).toList();
       if (queue.isEmpty) {

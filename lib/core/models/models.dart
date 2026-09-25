@@ -50,9 +50,7 @@ class Track {
       audioQuality: json['audioQuality'] != null
           ? AudioQuality.fromJson(json['audioQuality'])
           : null,
-      // Preserve the original provider response (which carries audioModes /
-      // mediaMetadata.tags used for Atmos detection) instead of the whole
-      // serialized Track, so isAtmos survives the MediaItem round-trip.
+      // Preserve the original provider response for fidelity.
       rawData: json['rawData'] is Map
           ? Map<String, dynamic>.from(json['rawData'])
           : json,
@@ -84,24 +82,6 @@ class Track {
   String get displayImage => albumCover ?? '';
   bool get isHiRes => audioQuality?.isHiRes ?? false;
 
-  bool get isAtmos {
-    final raw = rawData;
-    if (raw is Map<String, dynamic>) {
-      final modes = raw['audioModes'];
-      if (modes is List &&
-          modes.any((e) => e.toString().contains('ATMOS'))) {
-        return true;
-      }
-      final tags = raw['mediaMetadata'] is Map
-          ? raw['mediaMetadata']['tags']
-          : null;
-      if (tags is List &&
-          tags.any((e) => e.toString().contains('ATMOS'))) {
-        return true;
-      }
-    }
-    return false;
-  }
   String? get album => albumTitle;
   String? get image => albumCover;
 }

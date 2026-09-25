@@ -28,7 +28,7 @@ class AddonsScreen extends StatelessWidget {
       ),
       body: Column(
         children: [
-          if (!addonService.installedAddons.any((a) => a.id == 'io.thevolecitor.beatboss-sync'))
+          if (!addonService.installedAddons.any((a) => a.id == 'io.thevolecitor.metmusic-sync'))
             _buildSyncSetupWidget(context),
           Expanded(
             child: addonService.installedAddons.isEmpty
@@ -67,7 +67,7 @@ class AddonsScreen extends StatelessWidget {
           ),
           ElevatedButton(
             onPressed: () {
-              launchUrl(Uri.parse('https://beatboss-sync-addon.thevolecitor.qzz.io'));
+              launchUrl(Uri.parse('https://metmusic-sync-addon.thevolecitor.qzz.io'));
             },
             style: ElevatedButton.styleFrom(
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),

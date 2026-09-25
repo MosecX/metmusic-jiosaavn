@@ -1,8 +1,7 @@
-// Native-only download helpers. Contains all dart:io, audiotags, permission_handler
-// and DASH code. This file is ONLY compiled when dart.library.html is NOT present (native).
-// dart2js will NEVER compile this file.
+// Native-only download helpers. Contains all dart:io, audiotags and
+// permission_handler code. This file is ONLY compiled when dart.library.html
+// is NOT present (native). dart2js will NEVER compile this file.
 
-import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -11,10 +10,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../models/models.dart';
 import '../utils/flac_utils.dart';
-import '../utils/dash_utils.dart';
 import '../utils/web_metadata_writer.dart';
-import 'settings_service.dart';
-import 'dash_native_parser.dart' as dnp;
 
 /// Request storage permissions on Android/iOS.
 Future<void> requestNativePermissions({
@@ -107,135 +103,6 @@ Future<void> writeNativeMetadata(String filePath, Track track, Dio dio) async {
         print('[Metadata] CRITICAL: Failed to restore filename: $e');
       }
     }
-  }
-}
-
-
-
-/// Download a DASH manifest (segmented audio).
-Future<bool> downloadDashTrack({
-  required Track track,
-  required String manifestDataUri,
-  required String downloadDir,
-  required String safeName,
-  required SettingsService settingsService,
-  required Dio dio,
-  required Map<String, double> activeDownloads,
-  required void Function() notifyCallback,
-  void Function(double progress)? onProgress,
-  void Function(bool success, String? error)? onComplete,
-}) async {
-  final trackId = track.id;
-  try {
-    final bool isDataUri = manifestDataUri.startsWith('data:');
-    
-    List<String> segmentUrls = [];
-    String? initUrl;
-    
-    if (isDataUri) {
-      final manifestBase64 = manifestDataUri.split(',').last;
-      final manifestContent = utf8.decode(base64Decode(manifestBase64));
-      final manifest = DashUtils.parseMpd(manifestContent);
-      initUrl = manifest.initUrl;
-      for (int index in manifest.segmentIndices) {
-        segmentUrls.add(DashUtils.getSegmentUrl(manifest, index));
-      }
-    } else {
-      // It's a standard HTTP URL, use DashNativeParser
-      final manifest = await dnp.DashNativeParser.parse(manifestDataUri);
-      initUrl = manifest.initSegmentUrl;
-      segmentUrls = manifest.mediaSegmentUrls;
-    }
-
-    final totalSegments = segmentUrls.length;
-    final List<Uint8List?> segmentBuffers = List.filled(segmentUrls.length, null);
-    Uint8List? initBuffer;
-    int completed = 0;
-
-    // 1. Fetch Init Segment if present
-    if (initUrl.isNotEmpty) {
-      final response = await dio.get<List<int>>(initUrl, options: Options(responseType: ResponseType.bytes));
-      if (response.statusCode == 200 || response.statusCode == 206) {
-        initBuffer = Uint8List.fromList(response.data!);
-      }
-    }
-
-    // 2. Fetch Media Segments
-    const int batchSize = 10;
-    for (int i = 0; i < segmentUrls.length; i += batchSize) {
-      final end = (i + batchSize < segmentUrls.length) ? i + batchSize : segmentUrls.length;
-      final batch = segmentUrls.sublist(i, end);
-      
-      final results = await Future.wait(batch.asMap().entries.map((entry) async {
-        final batchIndex = entry.key;
-        final url = entry.value;
-        final response = await dio.get<List<int>>(url, options: Options(responseType: ResponseType.bytes));
-        return MapEntry(batchIndex + i, response.data!); // Keep original index
-      }));
-
-      for (final entry in results) {
-        segmentBuffers[entry.key] = Uint8List.fromList(entry.value);
-      }
-      completed += batch.length;
-      final progress = (completed / totalSegments) * 100;
-      activeDownloads[trackId] = progress;
-      onProgress?.call(progress);
-      notifyCallback();
-    }
-
-    // 3. Remux fragmented MP4 to raw FLAC
-    print('[Download] Remuxing fragmented MP4 to raw FLAC stream...');
-    final audioBuilder = BytesBuilder(copy: false);
-    for (int i = 0; i < segmentBuffers.length; i++) {
-      final buf = segmentBuffers[i];
-      if (buf == null) continue;
-      final mdata = DashUtils.extractBoxData(buf, 'mdat');
-      if (mdata != null) {
-        audioBuilder.add(mdata);
-      }
-    }
-    final rawAudio = audioBuilder.takeBytes();
-
-    final flacBuilder = BytesBuilder(copy: false);
-    flacBuilder.add(Uint8List.fromList([0x66, 0x4C, 0x61, 0x43])); // fLaC Magic
-    
-    Uint8List? flacMetadata;
-    if (initBuffer != null) {
-      final raw = DashUtils.extractBoxData(initBuffer, 'dfLa');
-      if (raw != null && raw.length > 4) {
-        flacMetadata = raw.sublist(4);
-      }
-    }
-
-    if (flacMetadata != null) {
-      final mutableMeta = Uint8List.fromList(flacMetadata);
-      flacBuilder.add(mutableMeta);
-    }
-    flacBuilder.add(rawAudio);
-    
-    final finalBytes = flacBuilder.takeBytes();
-
-    // 4. Save to file
-    final finalPath = '$downloadDir${Platform.pathSeparator}$safeName.flac';
-    final file = File(finalPath);
-    await file.writeAsBytes(finalBytes);
-
-
-
-    // 5. Write Metadata
-    await writeNativeMetadata(finalPath, track, dio);
-    await settingsService.registerDownload(trackId, finalPath, track: track);
-
-    activeDownloads.remove(trackId);
-    notifyCallback();
-    onComplete?.call(true, null);
-    return true;
-  } catch (e) {
-    print('[Download] DASH Error: $e');
-    activeDownloads.remove(trackId);
-    notifyCallback();
-    onComplete?.call(false, e.toString());
-    return false;
   }
 }
 

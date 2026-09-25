@@ -16,7 +16,6 @@ import '../shared/track_list_tile.dart';
 import '../shared/offline_banner.dart';
 import '../shared/player_shell.dart';
 import '../album/album_detail_screen.dart';
-import '../mix/mix_screen.dart';
 import '../shared/quality_badge.dart';
 
 class ArtistDetailScreen extends StatefulWidget {
@@ -227,14 +226,6 @@ class _ArtistDetailScreenState extends State<ArtistDetailScreen> {
               ),
             ),
 
-            if (artist.artistMixId != null)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                  child: _buildMixCard(artist.artistMixId!, artist, cs),
-                ),
-              ),
-
             if (topTracks.isNotEmpty) ...[
               SliverToBoxAdapter(
                 child: Padding(
@@ -315,62 +306,6 @@ class _ArtistDetailScreenState extends State<ArtistDetailScreen> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildMixCard(String mixId, AddonArtist artist, ColorScheme cs) {
-    return InkWell(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => MixScreen(
-              id: mixId,
-              addonId: artist.addonId,
-              initialTitle: 'Mix del artista',
-              initialArtwork: artist.artworkURL,
-            ),
-          ),
-        );
-      },
-      borderRadius: BorderRadius.circular(AppTheme.radiusDefault),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: cs.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(AppTheme.radiusDefault),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.auto_awesome, color: Color(0xFFFACC15), size: 24),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Mix del artista',
-                    style: TextStyle(
-                      color: cs.onSurface,
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Un mix de ${artist.name}',
-                    style: TextStyle(
-                      color: cs.onSurfaceVariant,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
-          ],
-        ),
-      ),
     );
   }
 

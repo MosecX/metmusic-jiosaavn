@@ -11,7 +11,6 @@ import '../../core/services/download_manager_service.dart';
 import '../../core/models/models.dart';
 import '../../core/utils/app_toast.dart';
 import 'quality_badge.dart';
-import '../mix/mix_screen.dart';
 
 class TrackListTile extends StatelessWidget {
   final Track track;
@@ -107,7 +106,7 @@ class TrackListTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            QualityBadge(track: track, shortAtmos: true),
+            QualityBadge(track: track),
           ],
         ),
         subtitle: Text(
@@ -131,7 +130,6 @@ class TrackListTile extends StatelessWidget {
               itemBuilder: (context) => [
                 const PopupMenuItem(value: 'play_next', child: Text('Reproducir siguiente')),
                 const PopupMenuItem(value: 'add_queue', child: Text('Añadir a la cola')),
-                const PopupMenuItem(value: 'mix', child: Text('Mix de la canción')),
                 const PopupMenuItem(value: 'add_playlist', child: Text('Añadir a playlist')),
                 PopupMenuItem(
                   value: _isFavorite(context) ? 'unlike' : 'like',
@@ -246,27 +244,6 @@ class TrackListTile extends StatelessWidget {
       case 'play_next':
         player.playNext(track);
         AppToast.show(context, 'Sonará "${track.title}" a continuación');
-        break;
-      case 'mix':
-        String? mixId;
-        final raw = track.rawData;
-        if (raw != null) {
-          final mixes = raw['mixes'];
-          if (mixes is Map) {
-            final m = mixes['TRACK_MIX'];
-            if (m is String && m.isNotEmpty) mixId = m;
-          }
-          mixId ??= raw['mixId']?.toString();
-        }
-        mixId ??= track.addonTrackId ?? track.id;
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => MixScreen(
-            id: mixId!,
-            addonId: track.addonId ?? 'com.tidal.hifi',
-            initialTitle: 'Mix · ${track.title}',
-            initialArtwork: track.albumCover,
-          ),
-        ));
         break;
       case 'like':
       case 'unlike':

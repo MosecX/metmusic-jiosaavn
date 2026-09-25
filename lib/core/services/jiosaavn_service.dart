@@ -51,17 +51,21 @@ class JioSaavnMatch {
   const JioSaavnMatch({required this.song, required this.method});
 }
 
-/// Resolves Tidal tracks into permanent JioSaavn media URLs.
+/// Resolves JioSaavn songs into permanent media URLs.
 ///
 /// Search runs against the public JioSaavn API (`/api/songs?q=`), the audio
 /// URL is recovered from `encrypted_media_url` (DES-ECB, key 38346591 — see
 /// [DesEcb]) and the bitrate is upgraded to the best available (320 → 160 →
-/// 96). Far simpler and more reliable than the YouTube Music ladder.
+/// 96).
 class JioSaavnService {
   static const String _base = String.fromEnvironment(
     'JIO_SAVNN_API_BASE',
     defaultValue: 'https://rthmx.vercel.app/api',
   );
+
+  /// Public accessor so other services (e.g. [JioSaavnAddonHandler]) can hit
+  /// the same API base for catalog/detail endpoints.
+  static String get apiBase => _base;
 
   static const List<int> _qualities = [320, 160, 96, 48, 12];
 
@@ -144,14 +148,61 @@ class JioSaavnService {
 
   /// Returns [title] without the "(feat. X)"/"(ft. X)"/"(featuring X)" part.
   ///
-  /// Tidal suele nombrar "INTRO APOCALIPTO (feat. Jay Wheeler)" mientras que
-  /// JioSaavn solo tiene "INTRO APOCALIPTO"; además los paréntesis en la
-  /// consulta rompen la búsqueda del API (0 resultados). Al buscar/comparar
-  /// con el título "nucleo" ambos lados coinciden.
+  /// Los paréntesis en la consulta rompen la búsqueda del API (0 resultados),
+  /// y JioSaavn suele nombrar la pista sin el "(feat. X)".
   static String _coreTitle(String title) {
     final t = title.replaceAll(_featParen, '').trim();
     final t2 = t.replaceAll(_featDangling, '').trim();
     return t2.isEmpty ? t : t2;
+  }
+
+  /// Builds a [JioSaavnSong] from a raw JioSaavn JSON row, covering the two
+  /// shapes the rthmx API returns:
+  ///
+  /// * search/playlist/song rows: `encrypted_media_url` inside `more_info`,
+  ///   `duration` also inside `more_info`;
+  /// * album detail rows: `encrypted_media_url` and `duration` at top level.
+  ///
+  /// Returns null when the row lacks an encrypted media URL (can't be played).
+  static JioSaavnSong? fromRawMap(Map<String, dynamic> raw) {
+    final token = raw['token']?.toString();
+    if (token == null || token.isEmpty) return null;
+
+    final more = raw['more_info'];
+    final moreMap = more is Map ? Map<String, dynamic>.from(more) : <String, dynamic>{};
+
+    final enc = (moreMap['encrypted_media_url'] ?? raw['encrypted_media_url'])
+        ?.toString();
+    if (enc == null || enc.isEmpty) return null;
+
+    final subtitle = raw['subtitle']?.toString() ?? '';
+
+    // El artista estructurado (more_info.artists.primary) es más fiable que
+    // parsear el subtítulo ("Kendo kaponi ft. Jay Wheeler - APOCALIPTO").
+    var artist = '';
+    final artists = moreMap['artists'];
+    if (artists is Map) {
+      final primary = artists['primary'];
+      if (primary is List && primary.isNotEmpty && primary.first is Map) {
+        final name = primary.first['name']?.toString().trim() ?? '';
+        if (name.isNotEmpty) artist = name;
+      }
+    }
+    if (artist.isEmpty) {
+      final sep = subtitle.indexOf(' - ');
+      artist = sep > 0 ? subtitle.substring(0, sep) : subtitle;
+    }
+
+    return JioSaavnSong(
+      token: token,
+      title: raw['title']?.toString() ?? '',
+      artist: artist,
+      album: moreMap['album']?.toString(),
+      durationSeconds:
+          int.tryParse((moreMap['duration'] ?? raw['duration'])?.toString() ?? ''),
+      thumbnailUrl: raw['image']?.toString(),
+      encryptedMediaUrl: enc,
+    );
   }
 
   /// Searches the JioSaavn catalog for songs matching [query].
@@ -169,43 +220,24 @@ class JioSaavnService {
     final songs = <JioSaavnSong>[];
     for (final raw in data['results'] as List) {
       if (raw is! Map) continue;
-      final more = raw['more_info'];
-      if (more is! Map || raw['token'] == null) continue;
-      final enc = more['encrypted_media_url'];
-      if (enc is! String || enc.isEmpty) continue;
-
-      final subtitle = raw['subtitle']?.toString() ?? '';
-
-      // El artista estructurado (more_info.artists.primary) es más fiable que
-      // parsear el subtítulo ("Kendo kaponi ft. Jay Wheeler - APOCALIPTO").
-      var artist = '';
-      final artists = more['artists'];
-      if (artists is Map) {
-        final primary = artists['primary'];
-        if (primary is List && primary.isNotEmpty && primary.first is Map) {
-          final name = primary.first['name']?.toString().trim() ?? '';
-          if (name.isNotEmpty) artist = name;
-        }
-      }
-      if (artist.isEmpty) {
-        final sep = subtitle.indexOf(' - ');
-        artist = sep > 0 ? subtitle.substring(0, sep) : subtitle;
-      }
-
-      songs.add(JioSaavnSong(
-        token: raw['token'].toString(),
-        title: raw['title']?.toString() ?? '',
-        artist: artist,
-        album: more['album']?.toString(),
-        durationSeconds: int.tryParse(more['duration']?.toString() ?? ''),
-        thumbnailUrl: raw['image']?.toString(),
-        encryptedMediaUrl: enc,
-      ));
+      final song = fromRawMap(Map<String, dynamic>.from(raw));
+      if (song != null) songs.add(song);
     }
     return songs;
   }
 
-  /// Finds the same recording as the Tidal track on JioSaavn.
+  /// Fetches a single song's detail by its JioSaavn token.
+  Future<JioSaavnSong?> songByToken(String token) async {
+    final res = await _dio.get(
+      '$_base/song',
+      queryParameters: {'token': token},
+    );
+    final data = res.data;
+    if (data is! Map) return null;
+    return fromRawMap(Map<String, dynamic>.from(data));
+  }
+
+  /// Finds a song on JioSaavn matching loose metadata (title/artist/album).
   Future<JioSaavnMatch?> findMatch({
     required String title,
     required String artist,
@@ -220,7 +252,7 @@ class JioSaavnService {
 
     // Con el álbum en la consulta la búsqueda de JioSaavn es mucho más
     // precisa (un título como "11:11" solo devuelve canciones irrelevantes),
-    // y con el título "nucleo" (sin el "(feat. X)" de Tidal) coincide con el
+    // y con el título "nucleo" (sin el "(feat. X)") coincide con el
     // nombre que usa JioSaavn y no rompe la búsqueda por los paréntesis.
     final albumWord = (album ?? '').trim();
     final coreTitle = _coreTitle(title);
@@ -260,7 +292,7 @@ class JioSaavnService {
     return null;
   }
 
-  /// Scores candidate songs against the Tidal metadata and returns the best.
+  /// Scores candidate songs against the given metadata and returns the best.
   ///
   /// Rules: el título tiene que correlacionar realmente (exacto o contenido),
   /// el artista debe aparecer como palabra entera en el título o ser el
@@ -314,8 +346,7 @@ class JioSaavnService {
       // entera en el título o artista principal del subtítulo). Sin esto un
       // cover con "roa" dentro de "Guava Road", o un "11:11" de otro artista
       // con la misma duración, gana puntos por artista/duración y se
-      // reproduce otra canción. Si no hay artista seguro, mejor se cae al
-      // stream de Tidal (grabación real) que reproducir audio incorrecto.
+      // reproduce otra canción.
       if (!hasArtist) continue;
 
       // Duración: corrobora la versión (penaliza cortes muy distintos).

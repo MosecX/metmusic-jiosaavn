@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../models/account_models.dart';
 import '../models/models.dart';
 import 'settings_service.dart';
+import 'jiosaavn_addon_handler.dart';
 
 class AccountService extends ChangeNotifier {
   final SettingsService _settings;
@@ -57,8 +58,6 @@ class AccountService extends ChangeNotifier {
       _favorites.where((f) => f.itemType == 'album').toList();
   List<FavoriteRow> get favoriteArtists =>
       _favorites.where((f) => f.itemType == 'artist').toList();
-  List<FavoriteRow> get favoriteMixes =>
-      _favorites.where((f) => f.itemType == 'mix').toList();
 
   bool isFavorite(String type, String itemId) =>
       _favorites.any((f) => f.itemType == type && f.itemId == itemId);
@@ -374,17 +373,13 @@ class AccountService extends ChangeNotifier {
 
 // ========== STORED TRACK MAPPING ==========
 
-String? coverUuidFromUrl(String? url) {
-  if (url == null || url.isEmpty) return null;
-  final m = RegExp(r'/images/([\w/-]+)/').firstMatch(url);
-  if (m != null) return m.group(1)!.replaceAll('/', '-');
-  return url;
-}
+/// Stored covers keep the JioSaavn CDN URL directly — no UUID indirection.
+String? coverUuidFromUrl(String? url) =>
+    (url == null || url.isEmpty) ? null : url;
 
 String coverUrlFromUuid(String? uuid, {int size = 640}) {
   if (uuid == null || uuid.isEmpty) return '';
-  if (uuid.startsWith('http')) return uuid;
-  return 'https://resources.tidal.com/images/${uuid.replaceAll('-', '/')}/${size}x$size.jpg';
+  return uuid;
 }
 
 AudioQuality qualityFromString(String? quality) {
@@ -409,42 +404,36 @@ Map<String, dynamic> storedTrackFromTrack(Track track) {
       : (raw['audioQuality'] is String ? raw['audioQuality'] as String : 'LOSSLESS');
 
   final rawId = track.addonTrackId ?? track.id;
-  final rawIdNum = int.tryParse(rawId);
-  final isHiRes = quality.toUpperCase().replaceAll('_', '').contains('HIRES');
 
   final rawAlbum = raw['album'] is Map
       ? Map<String, dynamic>.from(raw['album'] as Map)
       : <String, dynamic>{};
-  final rawArtist = raw['artist'] is Map
-      ? Map<String, dynamic>.from(raw['artist'] as Map)
+  final rawArtist = raw['artists'] is List &&
+          (raw['artists'] as List).isNotEmpty &&
+          (raw['artists'] as List).first is Map
+      ? Map<String, dynamic>.from((raw['artists'] as List).first as Map)
       : <String, dynamic>{};
-  final albumId = int.tryParse(track.albumId ?? rawAlbum['id']?.toString() ?? '');
+  final albumId = track.albumId ?? rawAlbum['id']?.toString();
   final albumTitle = track.albumTitle ?? rawAlbum['title']?.toString();
   final albumCover = coverUuidFromUrl(
-    track.albumCover ?? rawAlbum['cover']?.toString() ?? raw['cover']?.toString(),
+    track.albumCover ?? rawAlbum['cover']?.toString() ?? raw['cover']?.toString() ?? raw['image']?.toString(),
   );
-  final artistId = int.tryParse(track.artistId ?? rawArtist['id']?.toString() ?? '');
-  final artistName = track.artist ?? rawArtist['name']?.toString() ?? 'Unknown Artist';
-  final audioModes = raw['audioModes'] is List ? raw['audioModes'] : null;
+  final artistId = track.artistId ?? rawArtist['id']?.toString();
+  final artistName = track.artist != 'Unknown Artist'
+      ? track.artist
+      : rawArtist['name']?.toString() ?? 'Unknown Artist';
 
   return {
-    'id': rawIdNum ?? rawId,
+    'id': rawId,
     'addonId': track.addonId,
     'addonTrackId': rawId,
     'title': track.title,
     'duration': track.duration ?? 0,
-    'explicit': raw['explicit'] ?? false,
+    'explicit': raw['isExplicit'] ?? raw['explicit'] ?? false,
     'audioQuality': quality,
-    'isHiRes': isHiRes,
-    'audioModes': audioModes,
-    'version': raw['version'],
-    'trackNumber': raw['trackNumber'],
     'artist': {
       'id': artistId,
       'name': artistName,
-      'handle': rawArtist['handle'],
-      'type': rawArtist['type'] ?? 'MAIN',
-      'picture': coverUuidFromUrl(rawArtist['picture']?.toString() ?? raw['picture']?.toString()),
     },
     'artists': raw['artists'],
     'cover': albumCover,
@@ -466,7 +455,7 @@ Track trackFromStored(Map<String, dynamic> data) {
       : (data['albumTitle']?.toString());
   final cover = album is Map ? album['cover']?.toString() : null;
   final rawId = data['addonTrackId']?.toString() ?? data['id']?.toString() ?? '';
-  final addonId = data['addonId']?.toString() ?? 'com.tidal.hifi';
+  final addonId = data['addonId']?.toString() ?? JioSaavnAddonHandler.addonId;
   return Track(
     id: rawId.isNotEmpty ? '${addonId}_$rawId' : (data['id']?.toString() ?? ''),
     title: data['title']?.toString() ?? 'Unknown Title',

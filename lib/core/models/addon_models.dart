@@ -3,15 +3,6 @@ import 'models.dart';
 List<String>? _asStringList(dynamic value) =>
     value is List ? List<String>.from(value.map((e) => e.toString())) : null;
 
-List<String>? mergeAtmos(dynamic audioModes, dynamic mediaTags,
-    {bool isAtmos = false}) {
-  final set = <String>{};
-  if (audioModes is List) set.addAll(audioModes.map((e) => e.toString()));
-  if (mediaTags is List) set.addAll(mediaTags.map((e) => e.toString()));
-  if (isAtmos) set.add('ATMOS');
-  return set.isEmpty ? null : set.toList();
-}
-
 /// Normalize a backend quality string (e.g. "HIRES_LOSSLESS" with no
 /// underscore, or "LOSSLESS") to the canonical app form used by the badge.
 String? _normQualityStr(dynamic q) {
@@ -40,12 +31,11 @@ String? _firstArtistId(dynamic artists) {
   return null;
 }
 
-/// Quality string for the Tidal-style album badge: 'ATMOS' (Dolby Atmos),
-/// 'HI_RES_LOSSLESS' (Hi-Res), 'LOSSLESS', or null. Prefers the album-level
-/// audioQuality/isAtmos and falls back to its tracks when those are absent
-/// (e.g. album summaries that only carry a track list).
+/// Quality string for the album badge: 'HI_RES_LOSSLESS' (Hi-Res),
+/// 'LOSSLESS', or null. Prefers the album-level audioQuality and falls back
+/// to its tracks when that is absent (e.g. album summaries that only carry a
+/// track list).
 String? albumBadgeQuality(AddonAlbum album) {
-  if (album.isAtmos) return 'ATMOS';
   final aq = album.audioQuality;
   if (aq != null && aq.isNotEmpty) return aq;
   final tracks = album.tracks;
@@ -241,11 +231,6 @@ class AddonTrack {
 
   factory AddonTrack.fromJson(Map<String, dynamic> json, {required String addonId}) {
     final Map<String, dynamic> raw = Map<String, dynamic>.from(json);
-    final bool isAtmos = json['isAtmos'] == true ||
-        (json['isAtmos']?.toString().toLowerCase() == 'true');
-    if (isAtmos && raw['audioModes'] == null) {
-      raw['audioModes'] = ['ATMOS'];
-    }
     return AddonTrack(
       id: json['id']?.toString() ?? '',
       title: json['title'] ?? 'Unknown Title',
@@ -305,7 +290,6 @@ class AddonAlbum {
   final int? trackCount;
   final String? year;
   final String? type; // ALBUM, SINGLE, EP, ...
-  final List<String>? audioModes;
   final String? audioQuality; // canonical app form: HI_RES_LOSSLESS/LOSSLESS/...
   final List<AddonTrack>? tracks; // populated from /album/{id}
   final String addonId;
@@ -318,18 +302,12 @@ class AddonAlbum {
     this.trackCount,
     this.year,
     this.type,
-    this.audioModes,
     this.audioQuality,
     this.tracks,
     required this.addonId,
   });
 
-  bool get isAtmos =>
-      audioModes?.any((e) => e.toString().contains('ATMOS')) == true;
-
   factory AddonAlbum.fromJson(Map<String, dynamic> json, {required String addonId}) {
-    final isAtmos = json['isAtmos'] == true ||
-        (json['isAtmos']?.toString().toLowerCase() == 'true');
     return AddonAlbum(
       id: json['id']?.toString() ?? '',
       title: json['title'] ?? 'Unknown Album',
@@ -338,10 +316,6 @@ class AddonAlbum {
       trackCount: json['trackCount'] ?? json['numberOfTracks'],
       year: json['year']?.toString(),
       type: json['type']?.toString(),
-      audioModes: mergeAtmos(
-          json['audioModes'],
-          json['mediaMetadata'] is Map ? json['mediaMetadata']['tags'] : null,
-          isAtmos: isAtmos),
       audioQuality: _normQualityStr(json['audioQuality']),
       tracks: (json['tracks'] ?? json['songs'] ?? json['songList']) != null
           ? ((json['tracks'] ?? json['songs'] ?? json['songList']) as List<dynamic>)
@@ -358,7 +332,6 @@ class AddonArtist {
   final String id;
   final String name;
   final String? artworkURL;
-  final String? artistMixId;
   final List<String>? genres;
   final String? bio;
   final List<AddonTrack>? topTracks;
@@ -369,7 +342,6 @@ class AddonArtist {
     required this.id,
     required this.name,
     this.artworkURL,
-    this.artistMixId,
     this.genres,
     this.bio,
     this.topTracks,
@@ -382,7 +354,6 @@ class AddonArtist {
       id: json['id']?.toString() ?? '',
       name: json['name'] ?? 'Unknown Artist',
       artworkURL: json['artworkURL'] ?? json['image'],
-      artistMixId: json['artistMixId']?.toString(),
       genres: json['genres'] != null
           ? List<String>.from(json['genres'])
           : null,
@@ -478,43 +449,6 @@ class AddonSearchResult {
               ?.map((p) => AddonPlaylist.fromJson(p, addonId: addonId))
               .toList() ??
           [],
-    );
-  }
-}
-
-/// A mix result from any addon
-class AddonMix {
-  final String id;
-  final String title;
-  final String? subtitle;
-  final String? description;
-  final String? artworkURL;
-  final List<AddonTrack>? tracks;
-  final String addonId;
-
-  AddonMix({
-    required this.id,
-    required this.title,
-    this.subtitle,
-    this.description,
-    this.artworkURL,
-    this.tracks,
-    required this.addonId,
-  });
-
-  factory AddonMix.fromJson(Map<String, dynamic> json, {required String addonId}) {
-    return AddonMix(
-      id: json['id']?.toString() ?? '',
-      title: json['title'] ?? 'Mix',
-      subtitle: json['subtitle']?.toString() ?? json['subTitle']?.toString(),
-      description: json['description']?.toString(),
-      artworkURL: json['artworkURL'] ?? json['image'] ?? json['picture'],
-      tracks: json['tracks'] != null
-          ? (json['tracks'] as List<dynamic>)
-              .map((t) => AddonTrack.fromJson(t, addonId: addonId))
-              .toList()
-          : null,
-      addonId: addonId,
     );
   }
 }

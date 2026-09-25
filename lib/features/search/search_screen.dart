@@ -562,7 +562,6 @@ class _HostingerAlbumCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final atmos = album.isAtmos;
     final badge = albumBadgeQuality(album);
 
     return GestureDetector(
@@ -623,31 +622,6 @@ class _HostingerAlbumCard extends StatelessWidget {
                           ),
                   ),
                 ),
-                if (atmos)
-                  Positioned(
-                    top: AppTheme.space2,
-                    right: AppTheme.space2,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppTheme.space2,
-                        vertical: AppTheme.space1,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppTheme.accent,
-                        borderRadius:
-                            BorderRadius.circular(AppTheme.radiusPill),
-                      ),
-                      child: const Text(
-                        'ATMOS',
-                        style: TextStyle(
-                          fontFamily: AppTheme.bodyFont,
-                          fontSize: 8,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.surface,
-                        ),
-                      ),
-                    ),
-                  ),
                 if (badge != null)
                   Positioned(
                     top: AppTheme.space2,

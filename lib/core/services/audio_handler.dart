@@ -9,38 +9,27 @@ import '../models/models.dart';
 import '../models/addon_models.dart';
 import 'download_manager_service.dart';
 import 'addon_service.dart';
-import 'settings_service.dart';
-import 'jiosaavn_service.dart';
-import 'dash_service.dart';
-import 'dash_native_parser.dart';
-import 'dash_local_proxy_server.dart';
 
 /// The AudioHandler manages the audio player and the playlist.
 /// It exposes the standard AudioService interface to the UI (and system).
 /// Uses just_audio Player directly.
+///
+/// All playback is sourced from JioSaavn: every track in the catalog IS a
+/// JioSaavn track, so stream resolution goes straight through the JioSaavn
+/// addon handler (no cross-matching/fallback).
 class AppAudioHandler extends BaseAudioHandler with SeekHandler {
   late final AudioPlayer _player;
   final DownloadManagerService _downloadManager;
   final AddonService _addonService;
-  final SettingsService _settings;
-
-  // JioSaavn playback source (set from main.dart after boot).
-  late final JioSaavnService _jioSaavn;
 
   // Internal Queue State
   List<Track> _internalQueue = [];
   int _currentIndex = -1;
-  bool _isDashActive = false;
-  Timer? _positionTimer;
   int _lastRequestId = 0;
   bool _isSwitchingTrack = false;
   bool _isLoadingTrack = false;
   final ValueNotifier<String?> loadingTrackId = ValueNotifier<String?>(null);
   final ValueNotifier<String?> playbackError = ValueNotifier<String?>(null);
-
-  /// Non-blocking info shown in the player when playback fell back to another
-  /// source (e.g. Tidal → JioSaavn). Cleared whenever a new track starts.
-  final ValueNotifier<String?> playbackNotice = ValueNotifier<String?>(null);
 
   final List<StreamSubscription> _subscriptions = [];
 
@@ -53,32 +42,19 @@ class AppAudioHandler extends BaseAudioHandler with SeekHandler {
   AppAudioHandler({
     required DownloadManagerService downloadManager,
     required AddonService addonService,
-    required SettingsService settings,
   })  : _downloadManager = downloadManager,
-        _addonService = addonService,
-        _settings = settings {
+        _addonService = addonService {
     _init();
   }
 
-  /// Called from main.dart once the singleton JioSaavnService exists.
-  void attachJioSaavn(JioSaavnService service) => _jioSaavn = service;
-
-  bool get _useJioSaavnSource => _settings.isJioSaavnSource;
-
   // Expose explicit state for UI polling
-  Duration get currentPosition {
-    if (_isDashActive) return playbackState.value.position;
-    return _player.position;
-  }
+  Duration get currentPosition => _player.position;
 
-  bool get isPlayerPlaying {
-    if (_isDashActive) return playbackState.value.playing;
-    return _player.playing;
-  }
+  bool get isPlayerPlaying => _player.playing;
 
   Future<void> _init() async {
     _player = AudioPlayer();
-    
+
     if (!kIsWeb) {
       _downloadManager.cleanupTemporaryFiles();
     }
@@ -109,16 +85,6 @@ class AppAudioHandler extends BaseAudioHandler with SeekHandler {
       }),
       _player.durationStream.listen((_) => _broadcastState()),
     ]);
-
-    if (kIsWeb) {
-      _subscriptions.add(_player.playingStream.listen((playing) {
-        if (playing) {
-          _startPositionPolling();
-        } else {
-          _stopPositionPolling();
-        }
-      }));
-    }
   }
 
   /// Broadcasts current player state to audio_service (SMTC / Bluetooth / UI)
@@ -200,46 +166,22 @@ class AppAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> play() async {
-    if (_isDashActive && kIsWeb) {
-      DashService.resume();
-      playbackState.add(playbackState.value.copyWith(playing: true, speed: 1.0));
-      return;
-    }
     _player.play();
   }
 
   @override
   Future<void> pause() async {
-    if (_isDashActive && kIsWeb) {
-      DashService.pause();
-      playbackState.add(playbackState.value.copyWith(playing: false, speed: 0.0));
-      return;
-    }
     _player.pause();
   }
 
   @override
   Future<void> stop() async {
-    if (kIsWeb) {
-      DashService.stop();
-      _isDashActive = false;
-      _stopPositionPolling();
-    }
-    if (!kIsWeb && (PlatformHelper.isWindows || PlatformHelper.isLinux)) {
-      DashLocalProxyServer.stop();
-    }
     await _player.stop();
-    _stopPositionPolling();
     return super.stop();
   }
 
   @override
   Future<void> seek(Duration position) async {
-    if (_isDashActive && kIsWeb) {
-      DashService.seek(position.inSeconds.toDouble());
-      playbackState.add(playbackState.value.copyWith(updatePosition: position));
-      return;
-    }
     return _player.seek(position);
   }
 
@@ -310,42 +252,23 @@ class AppAudioHandler extends BaseAudioHandler with SeekHandler {
 
     _currentIndex = index;
     final track = _internalQueue[index];
-    final bool isAtmos = track.isAtmos;
-    final bool wasDash = _isDashActive;
     final requestId = ++_lastRequestId;
     _isSwitchingTrack = true;
     _isLoadingTrack = true;
     loadingTrackId.value = track.id;
     playbackError.value = null;
-    playbackNotice.value = null;
     if (requestId == _lastRequestId) {
       mediaItem.add(_toMediaItem(track));
     }
     _broadcastState();
 
-    // "Idle Reset" pattern for DASH thread safety:
-    // Instead of disposing/recreating the player (which leaves zombie threads in
-    // ntdll.dll), we stop + set idle + wait for the OS to reap the DASH demuxer
-    // worker threads before handing it a new source.
-    if (kIsWeb) {
-      DashService.stop();
-    }
     try {
       await _player.stop();
-      // Crucial 500ms delay: allows ntdll.dll to fully reap the DASH segment-
-      // fetching threads and release WASAPI handles + file cache locks.
-      // Without this, the second stream writes to memory the OS still considers
-      // owned by the dying first stream's workers. Only needed when the
-      // previous track was DASH (direct->direct / direct->dash don't need it).
-      if (!kIsWeb && wasDash) {
-        await Future.delayed(const Duration(milliseconds: 500));
-      }
     } catch (e) {
       print('[AudioHandler] Stop error (ignored): $e');
     }
 
     if (requestId != _lastRequestId) return;
-    _isDashActive = false;
 
     try {
       final isDownloaded = _downloadManager.isDownloaded(track.id);
@@ -363,107 +286,23 @@ class AppAudioHandler extends BaseAudioHandler with SeekHandler {
       }
 
       // ── JioSaavn playback source ──
-      // When selected in settings, playback is resolved through JioSaavn:
-      // the Tidal track's title/artist is searched on JioSaavn and the same
-      // recording is streamed from its permanent AAC/MP4 CDN URL.
-      if (_useJioSaavnSource) {
-        await _playViaJioSaavn(track, requestId, startPosition);
-        return;
-      }
-
       // Robust retry loop: guarantee playback by re-fetching a fresh stream
       // URL and retrying setAudioSource on any failure (null URL, expired
-      // token, DASH parse error, transient network issue, etc.).
+      // URL, transient network issue, etc.).
       const int maxAttempts = 5;
       for (int attempt = 0; attempt < maxAttempts; attempt++) {
         if (requestId != _lastRequestId) return;
 
-        String? audioUrl;
         try {
-          final streamResult = await _resolveStream(
-            track, forceFresh: attempt > 0, atmos: isAtmos && attempt == 0);
+          final streamResult = await _resolveStream(track, forceFresh: attempt > 0);
           if (requestId != _lastRequestId) return;
 
           final url = streamResult?.url;
-          final format = streamResult?.format?.toLowerCase();
           if (url == null) throw Exception('No stream URL found');
 
-          final bool isDash =
-              (format == 'dash' || url.contains('<MPD') || url.contains('.mpd'));
-
-          if (isDash) {
-            const String proxy =
-                'https://webdownloadproxy.thevolecitor.workers.dev/?url=';
-            if (kIsWeb) {
-              final manifestUri = await DashService.getManifestUri(url,
-                  proxy: proxy, trackId: track.id);
-              DashService.init(manifestUri, proxy);
-              _isDashActive = true;
-              _startPositionPolling();
-
-              final item = _toMediaItem(track);
-              mediaItem.add(item);
-              playbackState.add(playbackState.value.copyWith(
-                playing: true,
-                speed: 1.0,
-                processingState: AudioProcessingState.ready,
-                controls: [
-                  MediaControl.skipToPrevious,
-                  MediaControl.pause,
-                  MediaControl.skipToNext
-                ],
-              ));
-              if (requestId != _lastRequestId) return;
-              final genuine = await _isGenuinePlayback(track);
-              if (requestId != _lastRequestId) return;
-              if (genuine) {
-                _preloadNext();
-                return;
-              }
-              print('[AudioHandler] Tidal devolvió solo un preview de '
-                  '"${track.title}" — cambiando a JioSaavn.');
-              playbackNotice.value =
-                  'Tidal solo ofreció un preview — reproduciendo desde JioSaavn.';
-              break;
-            } else {
-              // All native platforms (Android, Windows, Linux) serve DASH
-              // through a local proxy that concatenates the init + media
-              // segments into a single playable HTTP stream.
-              DashLocalProxyServer.stop();
-              final DashManifest manifest;
-              if (url.startsWith('file://')) {
-                final mpdXml =
-                    await PlatformHelper.readFile(Uri.parse(url).toFilePath());
-                if (mpdXml == null || mpdXml.isEmpty) {
-                  throw Exception('Could not read local DASH manifest');
-                }
-                manifest = DashNativeParser.parseContent(mpdXml);
-              } else {
-                manifest = await DashNativeParser.parse(url);
-              }
-              audioUrl = await DashLocalProxyServer.start(
-                manifest,
-                proxyUrl: null, // As requested, do NOT use the Cloudflare worker
-                getPosition: () => _player.position.inSeconds.toDouble(),
-              );
-            }
-          } else {
-            if (kIsWeb) DashService.stop();
-            audioUrl = url;
-          }
-
           if (requestId == _lastRequestId) {
-            await _setSourceAndPlay(audioUrl, track, requestId, startPosition);
+            await _setSourceAndPlay(url, track, requestId, startPosition);
             if (requestId != _lastRequestId) return;
-            final genuine = await _isGenuinePlayback(track);
-            if (requestId != _lastRequestId) return;
-            if (!genuine) {
-              print('[AudioHandler] Tidal solo devuelve un preview de '
-                  '"${track.title}" — cambiando a JioSaavn.');
-              playbackNotice.value =
-                  'Tidal solo ofreció un preview — reproduciendo desde JioSaavn.';
-              break;
-            }
             _preloadNext();
             return; // success
           }
@@ -477,14 +316,10 @@ class AppAudioHandler extends BaseAudioHandler with SeekHandler {
         }
       }
 
-      // All Tidal attempts failed or only returned previews — fall back to
-      // JioSaavn so playback still happens if the recording exists there.
+      // All attempts failed — surface the error to the UI.
       if (requestId == _lastRequestId) {
-        print('[AudioHandler] Tidal no cargó "${track.title}" — '
-            'probando JioSaavn.');
-        playbackNotice.value =
-            'Tidal no pudo cargar — reproduciendo desde JioSaavn.';
-        await _playViaJioSaavn(track, requestId, startPosition);
+        playbackError.value =
+            'No se pudo reproducir "${track.title}". Comprueba tu conexión.';
       }
     } catch (e, st) {
       print('[AudioHandler] CRITICAL PLAYBACK ERROR: $e');
@@ -499,134 +334,12 @@ class AppAudioHandler extends BaseAudioHandler with SeekHandler {
     }
   }
 
-  /// Playback through JioSaavn.
-  ///
-  /// 1. Searches JioSaavn by "artist title" (falling back to "title" and
-  ///    "title artist") and keeps the candidate only when title/artist/
-  ///    duration corroborate it.
-  /// 2. Resolves the permanent CDN URL (bitrate upgraded up to 320).
-  /// 3. Falls back silently to the Tidal stream when JioSaavn cannot provide
-  ///    the recording, so playback never breaks.
-  Future<void> _playViaJioSaavn(
-      Track track, int requestId, Duration? startPosition) async {
-    // 1. Match + 2. resolve (bounded retry ladder).
-    const int maxAttempts = 3;
-    for (int attempt = 0; attempt < maxAttempts; attempt++) {
-      if (requestId != _lastRequestId) return;
-      try {
-        final match = await _jioSaavn.findMatch(
-          title: track.title,
-          artist: track.artist,
-          album: track.albumTitle,
-          durationSeconds: track.duration,
-          useCache: attempt == 0,
-        );
-        if (requestId != _lastRequestId) return;
-
-        if (match == null) {
-          print('[AudioHandler/JioSaavn] No match for "${track.title}"');
-          break;
-        }
-
-        final stream = await _jioSaavn.resolveStream(
-          match.song,
-          forceFresh: attempt > 0,
-        );
-        if (requestId != _lastRequestId) return;
-
-        if (stream != null) {
-          print('[AudioHandler/JioSaavn] Playing "${track.title}" via '
-              'JioSaavn (${match.method}, ${stream.mimeType}, '
-              '${stream.bitrate}bps)');
-          await _setSourceAndPlay(stream.url, track, requestId, startPosition);
-          _preloadNext();
-          return;
-        }
-      } catch (e) {
-        print('[AudioHandler/JioSaavn] attempt ${attempt + 1}/$maxAttempts '
-            'failed: $e');
-      }
-      if (attempt < maxAttempts - 1 && requestId == _lastRequestId) {
-        await Future.delayed(const Duration(milliseconds: 500));
-      }
-    }
-
-    // 3. Graceful fallback — stream the Tidal source so playback continues.
-    print('[AudioHandler/JioSaavn] Falling back to Tidal stream for ${track.id}');
-    try {
-      final streamResult = await _resolveStream(track, forceFresh: true);
-      final url = streamResult?.url;
-      if (url != null && requestId == _lastRequestId) {
-        playbackNotice.value =
-            'JioSaavn no encontró la canción — reproduciendo desde Tidal.';
-        await _setSourceAndPlay(url, track, requestId, startPosition);
-        if (requestId == _lastRequestId && await _isGenuinePlayback(track)) {
-          _preloadNext();
-          return;
-        }
-        print('[AudioHandler/JioSaavn] Fallback Tidal solo era un preview — '
-            'descartado.');
-      }
-    } catch (e) {
-      print('[AudioHandler/JioSaavn] Tidal fallback failed too: $e');
-    }
-
-    if (requestId == _lastRequestId) {
-      playbackError.value =
-          'No se pudo reproducir "${track.title}".';
-    }
-  }
-
-  /// Normalizes `Track.duration` to whole seconds (some sources report ms).
-  static int? _trackDurationSeconds(Track track) {
-    final d = track.duration;
-    if (d == null || d <= 0) return null;
-    return d > 10000 ? d ~/ 1000 : d;
-  }
-
-  /// A Tidal preview is a ~30s clipped track while the real song is (almost
-  /// always) longer. Returns true when the loaded audio is clearly shorter
-  /// than the catalog duration.
-  bool _isPreviewPlayback(Track track, Duration? loaded) {
-    final expected = _trackDurationSeconds(track);
-    if (loaded == null || expected == null || expected <= 0) return false;
-    return loaded.inSeconds < expected - 15;
-  }
-
-  /// Waits until the player knows the current duration and reports whether
-  /// the loaded Tidal source is a genuine full-length track. If the duration
-  /// can't be determined we consider it genuine (can't prove otherwise).
-  Future<bool> _isGenuinePlayback(Track track) async {
-    Duration? loaded = _player.duration;
-    try {
-      if (loaded == null) {
-        if (_isDashActive && kIsWeb) {
-          for (var i = 0; i < 40; i++) {
-            final s = DashService.getDuration();
-            if (s > 0) {
-              loaded = Duration(seconds: s.toInt());
-              break;
-            }
-            await Future.delayed(const Duration(milliseconds: 250));
-          }
-        } else {
-          loaded = await _player.durationStream
-              .firstWhere((d) => d != null)
-              .timeout(const Duration(seconds: 8));
-        }
-      }
-    } catch (_) {
-      // Timeout / no duration yet — leave loaded as null.
-    }
-    return !_isPreviewPlayback(track, loaded);
-  }
-
   /// Resolve a playable stream result for a track, using a short-TTL cache so
   /// repeated switches (and especially auto-advance at track end) skip the
   /// network round-trip. Pass [forceFresh] to bypass the cache (used on retry
   /// attempts after a cached URL may have expired).
   Future<AddonStreamResult?> _resolveStream(Track track,
-      {bool forceFresh = false, bool atmos = false}) async {
+      {bool forceFresh = false}) async {
     final key = track.id;
     if (!forceFresh && _streamCache.containsKey(key)) {
       final ts = _streamCacheTs[key]!;
@@ -639,7 +352,6 @@ class AppAudioHandler extends BaseAudioHandler with SeekHandler {
     final result = await _addonService.getStreamResult(
       track.addonTrackId ?? track.id,
       addonId: track.addonId,
-      atmos: atmos,
     );
     if (result != null) {
       _streamCache[key] = result;
@@ -656,24 +368,6 @@ class AppAudioHandler extends BaseAudioHandler with SeekHandler {
     if (nextIdx >= _internalQueue.length) return;
     final next = _internalQueue[nextIdx];
 
-    if (_useJioSaavnSource) {
-      // Prefetch the JioSaavn match + stream for the next track.
-      () async {
-        try {
-          final match = await _jioSaavn.findMatch(
-            title: next.title,
-            artist: next.artist,
-            album: next.albumTitle,
-            durationSeconds: next.duration,
-          );
-          if (match != null) {
-            await _jioSaavn.resolveStream(match.song);
-          }
-        } catch (_) {}
-      }();
-      return;
-    }
-
     if (_streamCache.containsKey(next.id)) return;
     _resolveStream(next).catchError((_) => null);
   }
@@ -684,12 +378,6 @@ class AppAudioHandler extends BaseAudioHandler with SeekHandler {
       String audioUrl, Track track, int requestId, Duration? startPosition) async {
     if (requestId != _lastRequestId) return;
     print('[AudioHandler] Opening media: $audioUrl');
-    if (kIsWeb && _isDashActive) {
-      // Leaving a web DASH source for a progressive one — release the DASH
-      // element so it doesn't keep overriding the player.
-      DashService.stop();
-      _isDashActive = false;
-    }
     try {
       await _player.stop();
     } catch (_) {}
@@ -760,10 +448,6 @@ class AppAudioHandler extends BaseAudioHandler with SeekHandler {
     queue.add(_internalQueue.map(_toMediaItem).toList());
   }
 
-  void _unshuffleQueue() {
-    // No-op — we don't store the original order
-  }
-
   /// Volume: callers pass 0.0–1.0
   Future<void> setVolume(double volume) async {
     await _player.setVolume(volume.clamp(0.0, 1.0));
@@ -810,33 +494,6 @@ class AppAudioHandler extends BaseAudioHandler with SeekHandler {
   @override
   Future<void> onTaskRemoved() async => await stop();
 
-  void _startPositionPolling() {
-    if (!kIsWeb) return;
-    _positionTimer?.cancel();
-    _positionTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
-      if (_isDashActive) {
-        final pos = DashService.getPosition();
-        final dur = DashService.getDuration();
-        playbackState.add(playbackState.value.copyWith(
-          updatePosition: Duration(seconds: pos.toInt()),
-          speed: 1.0,
-          bufferedPosition: Duration(seconds: pos.toInt() + 10),
-        ));
-        if (dur > 0 && pos >= dur - 0.5) {
-          timer.cancel();
-          skipToNext();
-        }
-      } else {
-        _broadcastState();
-      }
-    });
-  }
-
-  void _stopPositionPolling() {
-    _positionTimer?.cancel();
-    _positionTimer = null;
-  }
-
   @override
   Future<void> customAction(String name, [Map<String, dynamic>? extras]) async {
     if (name == 'dispose') {
@@ -845,7 +502,6 @@ class AppAudioHandler extends BaseAudioHandler with SeekHandler {
       }
       _subscriptions.clear();
       await _player.dispose();
-      DashLocalProxyServer.stop();
     }
   }
 }

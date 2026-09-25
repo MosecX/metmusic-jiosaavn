@@ -112,23 +112,16 @@ class _PlayerBarState extends State<PlayerBar> {
       return const SizedBox.shrink();
     }
 
-    final isAtmos = track.isAtmos;
     return Container(
       height: isMobile ? 60 : 72,
       decoration: BoxDecoration(
         color: cs.surfaceContainer.withValues(alpha: 0.95),
-        border: isAtmos
-            ? Border(
-                top: BorderSide(
-                    color: cs.primary.withValues(alpha: 0.7), width: 2))
-            : null,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.2),
             blurRadius: 10,
             offset: const Offset(0, -2),
           ),
-          if (isAtmos) ...AppTheme.glowShadow(cs.primary, 0.5),
         ],
       ),
       child: isMobile
@@ -139,58 +132,6 @@ class _PlayerBarState extends State<PlayerBar> {
               onLyricsTap: () => _toggleLyrics(context),
               onTrackTap: () => _showExpandedPlayer(context, player, track),
             ),
-    );
-  }
-}
-
-/// Non-blocking notices shown in the player right below the quality badge:
-/// (a) when playback fell back to another source (e.g. Tidal → JioSaavn) and
-/// (b) when the JioSaavn source is selected in Settings.
-class _SourceNotice extends StatelessWidget {
-  const _SourceNotice();
-
-  @override
-  Widget build(BuildContext context) {
-    final settings = context.watch<SettingsService>();
-    final player = context.watch<AudioPlayerService>();
-
-    final messages = <String>[
-      if (player.playbackNotice != null) player.playbackNotice!,
-      if (settings.isJioSaavnSource)
-        'Fuente de audio: JioSaavn (elegida en Ajustes)',
-    ];
-    if (messages.isEmpty) return const SizedBox.shrink();
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (final m in messages)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 3),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.info_outline,
-                      size: 12, color: AppTheme.warning),
-                  const SizedBox(width: 4),
-                  Flexible(
-                    child: Text(
-                      m,
-                      style: const TextStyle(
-                        color: AppTheme.warning,
-                        fontSize: 11,
-                        height: 1.3,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
     );
   }
 }
@@ -960,25 +901,7 @@ class _ExpandedMobilePlayerState extends State<_ExpandedMobilePlayer>
                             ),
                           ),
                           const SizedBox(height: 6),
-                          track.isAtmos
-                              ? Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.accent,
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: const Text(
-                                    'Dolby Atmos',
-                                    style: TextStyle(
-                                      color: Colors.black,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                )
-                              : QualityBadge(track: track),
-                          const _SourceNotice(),
+                          QualityBadge(track: track),
                           const SizedBox(height: 8),
                           GestureDetector(
                             onTap: track.artistId != null

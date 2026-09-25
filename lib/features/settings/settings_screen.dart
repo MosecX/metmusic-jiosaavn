@@ -9,6 +9,7 @@ import '../../core/services/account_service.dart';
 import '../../core/services/addon_service.dart';
 import '../../core/services/connectivity_service.dart';
 import '../../core/services/download_manager_service.dart';
+import '../../core/services/jiosaavn_service.dart';
 import '../../core/models/addon_models.dart';
 import '../auth/auth_screen.dart';
 import '../shared/offline_banner.dart';
@@ -97,7 +98,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     children: [
                       _ServerStatusTile(
                         icon: Icons.dns_outlined,
-                        title: 'MetMusic API',
+                        title: 'JioSaavn API',
                         probe: () =>
                             context.read<AddonService>().checkApiHealth(),
                         expandable: true,
@@ -390,192 +391,98 @@ class _AccountTile extends StatelessWidget {
 class _PlaybackSourceTile extends StatelessWidget {
   const _PlaybackSourceTile();
 
-  static const _options = [
-    (
-      'tidal',
-      'Tidal',
-      'Catálogo Tidal · FLAC lossless y Hi-Res',
-      Icons.music_note_rounded,
-    ),
-    (
-      'jiosaavn',
-      'JioSaavn',
-      'Reproduce la misma canción vía JioSaavn',
-      Icons.play_circle_outline_rounded,
-    ),
-  ];
-
   @override
   Widget build(BuildContext context) {
-    final settings = context.watch<SettingsService>();
     final cs = Theme.of(context).colorScheme;
-    final current = settings.playbackSource;
-    final currentLabel = _options        .firstWhere((o) => o.$1 == current, orElse: () => _options.first)
-        .$2;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ListTile(
           leading: Icon(Icons.source_outlined, color: cs.onSurfaceVariant, size: 20),
-          title: Text('Fuente de reproducción', style: TextStyle(color: cs.onSurface)),
+          title: Text('Fuente de reproducción',
+              style: TextStyle(color: cs.onSurface)),
           subtitle: Text(
-            current == 'jiosaavn'
-                ? 'JioSaavn — la búsqueda sigue en Tidal, el audio viene de JioSaavn'
-                : 'Tidal — streaming lossless/Hi-Res del catálogo Tidal',
+            'JioSaavn — única fuente: catálogo, metadatos y audio (hasta 320 kbps)',
             style: TextStyle(color: cs.onSurfaceVariant),
           ),
-          trailing: PopupMenuButton<String>(
-            initialValue: current,
-            color: cs.surface,
-            onSelected: (value) => settings.setPlaybackSource(value),
-            itemBuilder: (context) => [
-              for (final o in _options)
-                PopupMenuItem(
-                  value: o.$1,
-                  child: Row(
-                    children: [
-                      Icon(
-                        o.$1 == current
-                            ? Icons.radio_button_checked
-                            : Icons.radio_button_off,
-                        size: 16,
-                        color: o.$1 == current ? cs.primary : cs.onSurfaceVariant,
-                      ),
-                      const SizedBox(width: AppTheme.space2),
-                      Icon(o.$4, size: 16, color: cs.onSurface),
-                      const SizedBox(width: AppTheme.space2),
-                      Text(o.$2),
-                    ],
+          trailing: const _PillBadge(label: 'JioSaavn'),
+        ),
+        Padding(
+          padding: EdgeInsets.fromLTRB(
+            AppTheme.space3,
+            0,
+            AppTheme.space3,
+            AppTheme.space2,
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.info_outline, size: 14, color: AppTheme.warning),
+              const SizedBox(width: AppTheme.space2),
+              Expanded(
+                child: Text(
+                  'Esta versión reproduce 100% desde JioSaavn: cada canción, '
+                  'álbum, artista y playlist proviene del catálogo de JioSaavn '
+                  'y el audio se transmite desde su CDN.',
+                  style: TextStyle(
+                    color: cs.onSurfaceVariant,
+                    fontSize: 11,
+                    height: 1.4,
                   ),
                 ),
+              ),
             ],
-            child: Container(
-              padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: cs.primary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(AppTheme.radiusPill),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    currentLabel,
-                    style: TextStyle(
-                      color: cs.primary,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      fontFamily: AppTheme.bodyFont,
-                    ),
-                  ),
-                  const SizedBox(width: 2),
-                  Icon(Icons.arrow_drop_down, color: cs.primary, size: 16),
-                ],
-              ),
-            ),
           ),
         ),
-        if (current == 'jiosaavn')
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              AppTheme.space3,
-              0,
-              AppTheme.space3,
-              AppTheme.space2,
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.info_outline, size: 14, color: AppTheme.warning),
-                const SizedBox(width: AppTheme.space2),
-                Expanded(
-                  child: Text(
-                    'Con JioSaavn activo, cada canción se localiza por su título y '
-                    'artista y el audio se transmite desde el CDN de JioSaavn '
-                    '(hasta 320 kbps). Las insignias de calidad se ocultan porque '
-                    'la calidad depende del formato disponible en JioSaavn.',
-                    style: TextStyle(
-                      color: cs.onSurfaceVariant,
-                      fontSize: 11,
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
       ],
     );
   }
 }
 
+// ── Pill Badge (shared by Playback + Quality tiles) ───────────────────
+class _PillBadge extends StatelessWidget {
+  final String label;
+  const _PillBadge({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: cs.primary.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(AppTheme.radiusPill),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: cs.primary,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          fontFamily: AppTheme.bodyFont,
+        ),
+      ),
+    );
+  }
+}
 // ── Quality Tile ──────────────────────────────────────────────────────
 class _QualityTile extends StatelessWidget {
   const _QualityTile();
 
-  static const _options = [
-    ('HI_RES_LOSSLESS', 'Hi-Res', 'FLAC 24-bit / up to 96 kHz'),
-    ('LOSSLESS', 'Lossless', 'FLAC 16-bit / 44.1 kHz'),
-    ('HIGH', 'High', 'AAC 320 kbps'),
-  ];
-
   @override
   Widget build(BuildContext context) {
-    final settings = context.watch<SettingsService>();
     final cs = Theme.of(context).colorScheme;
-    final current = settings.playbackQuality;
-    final label = _options        .firstWhere((o) => o.$1 == current, orElse: () => _options.first)
-        .$2;
-// JioSaavn source: quality is whatever the CDN exposes (MP4/AAC up to
-    // 320 kbps), so show a JioSaavn-accurate description instead of Tidal.
-    final isJio = settings.isJioSaavnSource;
-    final subtitle = isJio
-        ? 'MP4/AAC · hasta 320 kbps (según disponibilidad de JioSaavn)'
-        : _options
-            .firstWhere((o) => o.$1 == current, orElse: () => _options.first)
-            .$3;
-
     return ListTile(
       leading: Icon(Icons.high_quality_outlined, color: cs.onSurfaceVariant, size: 20),
       title: Text('Calidad de audio', style: TextStyle(color: cs.onSurface)),
-      subtitle: Text(subtitle, style: TextStyle(color: cs.onSurfaceVariant)),
-      trailing: isJio
-          ? Container(
-              padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: cs.primary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(AppTheme.radiusPill),
-              ),
-              child: Text(
-                'JioSaavn',
-                style: TextStyle(
-                  color: cs.primary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  fontFamily: AppTheme.bodyFont,
-                ),
-              ),
-            )
-          : Container(
-              padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: cs.primary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(AppTheme.radiusPill),
-              ),
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: cs.primary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  fontFamily: AppTheme.bodyFont,
-                ),
-              ),
-            ),
+      subtitle: Text(
+        'MP4/AAC · hasta 320 kbps (según disponibilidad de JioSaavn)',
+        style: TextStyle(color: cs.onSurfaceVariant),
+      ),
+      trailing: const _PillBadge(label: 'JioSaavn'),
     );
   }
 }
-
 // ── Lyrics Mode Tile ──────────────────────────────────────────────────
 class _LyricsModeTile extends StatelessWidget {
   const _LyricsModeTile();
@@ -813,9 +720,7 @@ class _ApiDetailedStatusPanel extends StatefulWidget {
   });
 
   static String baseUrlFromContext(BuildContext context) {
-    final settings = context.read<SettingsService>();
-    final raw = settings.tidalApiBase;
-    return raw.endsWith('/') ? raw.substring(0, raw.length - 1) : raw;
+    return JioSaavnService.apiBase;
   }
 
   @override
@@ -997,39 +902,38 @@ class _ApiProbe {
 }
 
 class _ApiProbes {
-  // Probes always go against the original MetMusic API (the source of
-  // truth for whether each endpoint actually works). The row in the main
-  // settings panel still tracks the user's configured backend.
-  static const String _originalApi = 'https://igameten10-ez-hifi-api.hf.space';
+  // Probes run against the JioSaavn API proxy (rthmx spec). The row in the
+  // main settings panel tracks whether the source of truth is reachable.
+  static const String _base = 'https://rthmx.vercel.app/api';
 
   static final all = <_ApiProbe>[
     _ApiProbe(
-      key: 'metadata',
-      label: 'Metadata',
-      icon: Icons.info_outline,
-      run: (_) => _checkMetadata(),
+      key: 'search',
+      label: 'Search songs',
+      icon: Icons.search,
+      run: (_) => _checkSearch(),
     ),
     _ApiProbe(
-      key: 'stream',
-      label: 'Stream',
+      key: 'song',
+      label: 'Song detail / stream',
       icon: Icons.play_circle_outline,
-      run: (_) => _checkStream(),
+      run: (_) => _checkSong(),
     ),
     _ApiProbe(
       key: 'album',
-      label: 'Album',
+      label: 'Album detail',
       icon: Icons.album_outlined,
       run: (_) => _checkAlbum(),
     ),
     _ApiProbe(
       key: 'artist',
-      label: 'Artist',
+      label: 'Artist detail',
       icon: Icons.person_outline,
       run: (_) => _checkArtist(),
     ),
     _ApiProbe(
       key: 'cover',
-      label: 'Cover image',
+      label: 'Cover image (CDN)',
       icon: Icons.image_outlined,
       run: (_) => _checkCover(),
     ),
@@ -1041,86 +945,71 @@ class _ApiProbes {
     headers: {'Accept': 'application/json'},
   ));
 
-  // Metadata: /info/?id=... — payload has {data: {id, title, ...}}
-  static Future<bool> _checkMetadata() async {
+  static const _token = 'OAUEZFl3cVo'; // "MANANA" (QMIIR)
+  static const _albumToken = 'YAF8sxXMEgo_';
+  static const _artistToken = 'UVXieI6jW5I_'; // Beyoncé
+
+  // Songs search: /songs?q= — 200 and at least one result.
+  static Future<bool> _checkSearch() async {
     try {
-      final res = await _dio.get(
-        '$_originalApi/info/',
-        queryParameters: {'id': '291170243'},
-      );
+      final res = await _dio.get('$_base/songs',
+          queryParameters: {'q': 'manana'});
       if (res.statusCode != 200) return false;
-      final data = _toMap(res.data);
-      final inner = _toMap(data['data']);
-      return inner['id']?.toString() == '291170243';
+      final results = (res.data is Map) ? res.data['results'] : null;
+      return results is List && results.isNotEmpty;
     } catch (_) {
       return false;
     }
   }
 
-  // Stream: /trackv2/?id=...&show_all_qualities=1
-  // Endpoint must return 200 AND have at least one quality available.
-  // 401s in qualities make the stream unusable even though the 200 OK
-  // response arrives.
-  static Future<bool> _checkStream() async {
+  // Song detail: /song?token= — 200 with an encrypted media URL (playable).
+  static Future<bool> _checkSong() async {
     try {
-      final res = await _dio.get(
-        '$_originalApi/trackv2/',
-        queryParameters: {'id': '291170243', 'show_all_qualities': 1},
-      );
+      final res = await _dio.get('$_base/song',
+          queryParameters: {'token': _token});
       if (res.statusCode != 200) return false;
       final data = _toMap(res.data);
-      final qualities = _toMap(data['available_qualities'] ?? {});
-      // If there's at least one quality that is available (no error), stream works.
-      for (final q in qualities.values) {
-        final qm = _toMap(q);
-        if (qm['available'] == true) return true;
-        // If quality has an explicit error, this quality is unusable.
-        // We only count it as working if some quality is available.
-      }
-      // No quality available → stream not usable.
-      return false;
+      final more = _toMap(data['more_info']);
+      final enc = more['encrypted_media_url'] ?? data['encrypted_media_url'];
+      return enc is String && enc.isNotEmpty;
     } catch (_) {
       return false;
     }
   }
 
-  // Album: /album/?id=291170235 — payload has {data: {id, title, ...}}
+  // Album detail: /album?token= — 200 and a non-empty songs list.
   static Future<bool> _checkAlbum() async {
     try {
-      final res = await _dio.get(
-        '$_originalApi/album/',
-        queryParameters: {'id': '291170235'},
-      );
+      final res = await _dio.get('$_base/album',
+          queryParameters: {'token': _albumToken});
       if (res.statusCode != 200) return false;
       final data = _toMap(res.data);
-      final inner = _toMap(data['data']);
-      return inner['id']?.toString() == '291170235';
+      final songs = data['songs'];
+      return songs is List && songs.isNotEmpty;
     } catch (_) {
       return false;
     }
   }
 
-  // Artist: /artist/?id=9947664 — payload has {artist: {id, name, ...}}
+  // Artist detail: /artist?token= — 200 and a non-empty topSongs list.
   static Future<bool> _checkArtist() async {
     try {
-      final res = await _dio.get(
-        '$_originalApi/artist/',
-        queryParameters: {'id': '9947664'},
-      );
+      final res = await _dio.get('$_base/artist',
+          queryParameters: {'token': _artistToken});
       if (res.statusCode != 200) return false;
       final data = _toMap(res.data);
-      final artist = _toMap(data['artist']);
-      return artist['id']?.toString() == '9947664';
+      final top = data['topSongs'];
+      return top is List && top.isNotEmpty;
     } catch (_) {
       return false;
     }
   }
 
-  // Cover image: HEAD request to resources.tidal.com — online if 200 + image/*
+  // Cover image: HEAD to the JioSaavn CDN — online when 200 + image/*.
   static Future<bool> _checkCover() async {
     try {
       final res = await _dio.head(
-        'https://resources.tidal.com/images/12f5b7b5/2cfd/4d15/ae4b/d4fd36759ce4/750x750.jpg',
+        'https://c.saavncdn.com/230/MANANA-Portuguese-2026-20260224212033-150x150.jpg',
         options: Options(receiveTimeout: const Duration(seconds: 6)),
       );
       if (res.statusCode != 200) return false;

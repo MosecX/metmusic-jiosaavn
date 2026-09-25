@@ -28,7 +28,6 @@ class SettingsService extends ChangeNotifier {
   static const String _keyAddonsList = 'addons_list';
   static const String _keyActiveAddonId = 'active_addon_id';
   static const String _keyRemovedBuiltins = 'removed_builtins';
-  static const String _keyTidalApiBase = 'tidal_api_base';
   static const String _keyPlaybackQuality = 'playback_quality';
   static const String _keyAccountApiBase = 'account_api_base';
   static const String _keySessionCookie = 'session_cookie';
@@ -304,36 +303,21 @@ class SettingsService extends ChangeNotifier {
     }
   }
 
-  // ========== Tidal API Base URL ==========
-
-  String get tidalApiBase => _box.get(_keyTidalApiBase,
-      defaultValue: 'https://hzloipljzbnammznxfnz.functions.supabase.co/api');
-
-  Future<void> setTidalApiBase(String url) async {
-    await _box.put(_keyTidalApiBase, url.trim());
-    notifyListeners();
-  }
-
-  // ========== Playback Source (Tidal / JioSaavn) ==========
+  // ========== Playback Source (JioSaavn only) ==========
 
   static const String _keyPlaybackSource = 'playback_source';
 
-  /// Where audio playback is sourced from:
-  ///   'tidal'      — Tidal catalog (default, unchanged behaviour)
-  ///   'jiosaavn'   — JioSaavn playback only (catalog still Tidal)
-  ///
-  /// Legacy stored values of 'youtube' are treated as 'jiosaavn', since the
-  /// YouTube Music playback was replaced by JioSaavn.
+  /// In this app playback is always sourced from JioSaavn — every catalog
+  /// track IS a JioSaavn track, so no cross-matching/fallback exists.
   String get playbackSource {
-    final stored = _box.get(_keyPlaybackSource, defaultValue: 'tidal');
-    return (stored == 'youtube' || stored == 'jiosaavn') ? 'jiosaavn' : 'tidal';
+    _box.get(_keyPlaybackSource, defaultValue: 'jiosaavn');
+    return 'jiosaavn';
   }
 
-  bool get isJioSaavnSource => playbackSource == 'jiosaavn';
+  bool get isJioSaavnSource => true;
 
   Future<void> setPlaybackSource(String source) async {
-    await _box.put(_keyPlaybackSource,
-        (source == 'youtube' || source == 'jiosaavn') ? 'jiosaavn' : 'tidal');
+    await _box.put(_keyPlaybackSource, 'jiosaavn');
     notifyListeners();
   }
 

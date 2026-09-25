@@ -79,24 +79,6 @@ class DownloadManagerService extends ChangeNotifier {
 
     final safeName = _sanitizeFilename('$artist - $title');
 
-    // 1. DASH DETECTION (High Priority)
-    final bool isDash = streamUrl.startsWith('data:application/dash+xml') || 
-                        streamUrl.contains('.mpd') || 
-                        (track.addonId?.contains('dash') ?? false); // Hint from provider logic if applicable
-
-    if (isDash) {
-        print('[Download] DASH manifest detected. Using segmented downloader.');
-        final downloadDir = kIsWeb ? '' : await _settingsService.getDownloadLocation();
-        return await _downloadDashTrack(
-          track: track,
-          manifestDataUri: streamUrl,
-          downloadDir: downloadDir,
-          safeName: safeName,
-          onProgress: onProgress,
-          onComplete: onComplete,
-        );
-    }
-
     // ── WEB: standard direct download ──────────────────────────────────────
     if (kIsWeb) {
       _activeDownloads[trackId] = 0;
@@ -224,42 +206,6 @@ class DownloadManagerService extends ChangeNotifier {
     if (kIsWeb) return;
     // Delegated to native-only helper (audiotags/FlacUtils)
     await dm.writeNativeMetadata(filePath, track, _dio);
-  }
-
-  Future<bool> _downloadDashTrack({
-    required Track track,
-    required String manifestDataUri,
-    required String downloadDir,
-    required String safeName,
-    void Function(double progress)? onProgress,
-    void Function(bool success, String? error)? onComplete,
-  }) async {
-    if (kIsWeb) {
-      return dm.downloadDashTrack(
-        track: track,
-        manifestDataUri: manifestDataUri,
-        downloadDir: downloadDir,
-        safeName: safeName,
-        settingsService: _settingsService,
-        dio: _dio,
-        activeDownloads: _activeDownloads,
-        notifyCallback: notifyListeners,
-        onProgress: onProgress,
-        onComplete: onComplete,
-      );
-    }
-    return dm.downloadDashTrack(
-      track: track,
-      manifestDataUri: manifestDataUri,
-      downloadDir: downloadDir,
-      safeName: safeName,
-      settingsService: _settingsService,
-      dio: _dio,
-      activeDownloads: _activeDownloads,
-      notifyCallback: notifyListeners,
-      onProgress: onProgress,
-      onComplete: onComplete,
-    );
   }
 
   /// Delete a downloaded track

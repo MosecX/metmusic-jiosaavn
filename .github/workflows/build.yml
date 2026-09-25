@@ -27,6 +27,9 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
+      # Optional: without these secrets the APK is signed with the debug key
+      # (see android/app/build.gradle.kts fallback), which is still installable
+      # on devices. Add the secrets later to get a proper release signature.
       - name: Configure release signing
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -34,7 +37,10 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          test -n "$ANDROID_KEYSTORE_BASE64"
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "No signing secrets configured — APK will be signed with the debug key."
+            exit 0
+          fi
           test -n "$ANDROID_KEYSTORE_PASSWORD"
           test -n "$ANDROID_KEY_ALIAS"
           test -n "$ANDROID_KEY_PASSWORD"
@@ -47,12 +53,24 @@ jobs:
           } > android/key.properties
 
       - name: Build Universal APK
-        run: flutter build apk
+        run: flutter build apk --release
 
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MetMusic-Android-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 7
+
+      # Optional: publishes to the CDN repo only when CDN_TOKEN is configured.
       - name: Publish APK to CDN repo
         env:
           CDN_TOKEN: ${{ secrets.CDN_TOKEN }}
         run: |
+          if [ -z "$CDN_TOKEN" ]; then
+            echo "CDN_TOKEN not configured — skipping CDN publish (artifact already uploaded)."
+            exit 0
+          fi
           VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: *//; s/+.*//')
           SHORT_SHA=$(git rev-parse --short HEAD)
           git clone --depth 1 "https://x-access-token:${CDN_TOKEN}@github.com/MosecX/cdn.tinvoxdevelopment.git" cdn-repo

@@ -347,7 +347,7 @@ class _AppShellState extends State<AppShell> {
                 ),
                 const SizedBox(width: AppTheme.space3),
                 Text(
-                  'BeatBoss',
+                  'MetMusic - JioSaavn',
                   style: TextStyle(
                     fontFamily: AppTheme.displayFont,
                     fontSize: 22,

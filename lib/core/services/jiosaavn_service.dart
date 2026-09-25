@@ -424,8 +424,11 @@ class JioSaavnService {
             receiveTimeout: const Duration(seconds: 5),
           ),
         );
-        final type = res.headers.value('content-type') ?? '';
-        if (type.startsWith('audio/')) return candidate;
+      final type = res.headers.value('content-type') ?? '';
+      if (type.startsWith('audio/')) {
+        print('[JioSaavn] Best quality probe: $quality kbps → $candidate');
+        return candidate;
+      }
       } catch (_) {
         // Try a lower bitrate.
       }

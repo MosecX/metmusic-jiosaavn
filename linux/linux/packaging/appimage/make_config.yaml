@@ -1,0 +1,9 @@
+display_name: MetMusic JioSaavn
+package_name: metmusic-jiosaavn
+maintainer:
+  name: Your Name
+  email: contact@example.com
+icon: assets/icon.png
+categories:
+  - AudioVideo
+  - Audio

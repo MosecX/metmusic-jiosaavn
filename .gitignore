@@ -1,0 +1,56 @@
+
+# Misc
+*.class
+*.log
+*.lock
+*.ctxt
+
+# Flutter/Dart/Pub
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+flutter_*.png
+flutter_*.jpg
+
+# Editor
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# Sensitive
+# lib/core/services/spotify_service.dart (safe to commit - no credentials)
+
+# Build Artifacts
+/dist/
+/installers/
+*.exe
+*.iss
+*.msi
+*.apk
+*.aab
+/windows/flutter/ephemeral/
+/android/.gradle/
+/android/app/build/
+/build/
+android/key.properties
+android/*.jks
+android/*.keystore
+android/github-actions-secrets.txt
+
+# Remote Server
+dab-sync-server/
+
+dash_test_app/
+temp_repo/
+monochrome_temp/
+record.xml
+serve_wasm.py
+serve_web.bat
+.metadata
+devtools_options.yaml

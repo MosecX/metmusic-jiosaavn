@@ -1,0 +1,128 @@
+name: metmusic_jiosaavn
+description: "MetMusic JioSaavn - Pure JioSaavn music streaming app."
+publish_to: 'none'
+# Incremented Android versionCode so this release can replace earlier builds.
+version: 1.0.0
+
+environment:
+  sdk: '>=3.1.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Core
+  cupertino_icons: ^1.0.8
+
+  # State Management
+  provider: ^6.1.2
+
+  # Networking
+  dio: ^5.4.1
+  connectivity_plus: ^6.0.5
+
+  # Audio Playback
+  # - media_kit is the primary engine (libmpv) for standard streams.
+  # - just_audio is used directly (not as a media_kit wrapper) for
+  #   ProgressiveStreamSource / DASH sources in audio_handler.dart and
+  #   dash_stream_audio_source.dart.
+  media_kit: ^1.2.6
+  media_kit_libs_audio: ^1.0.7
+  just_audio: ^0.10.5
+  just_audio_windows: ^0.2.3
+  just_audio_media_kit: ^2.1.0
+
+
+  # System Media Controls (SMTC on Windows, lock-screen on Android, Bluetooth)
+  audio_service: ^0.18.18
+  audio_service_win: ^0.0.2
+  wakelock_plus: ^1.2.8
+
+
+
+  # YouTube (Metadata Extraction + Direct Playback)
+  youtube_explode_dart: ^3.1.0
+
+  # Local Storage
+  # hive_ce is the single maintained Hive line used on both native and web
+  # (see lib/core/utils/hive/hive_provider.dart). It is an exact API-
+  # compatible fork of hive, so Box/Hive.initFlutter()/Hive.openBox() work
+  # identically without a data migration step.
+  hive_ce: ^2.0.0
+  hive_ce_flutter: ^2.0.0
+  path_provider: ^2.1.2
+  flutter_secure_storage: ^10.0.0
+  web: ^1.1.1
+  http: ^1.2.0
+  crypto: ^3.0.3
+
+  # UI Utilities
+  cached_network_image: ^3.3.1
+  shimmer: ^3.0.0
+  reicon_flutter: ^1.0.1
+  flutter_svg: ^2.3.0
+
+  # Utilities
+  url_launcher: ^6.2.4
+  permission_handler: ^11.3.0
+  html: ^0.15.4
+  win32: ^5.0.0
+
+  image: ^4.1.7
+  file_picker: ^8.1.4
+  ffi: ^2.2.0
+  # metadata_god: ^1.1.0
+
+  xml: any
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+  hive_generator: ^2.0.1
+  build_runner: ^2.4.8
+  flutter_launcher_icons: ^0.13.1
+  flutter_distributor: ^0.5.0
+
+flutter_icons:
+  android: "launcher_icon"
+  ios: false
+  image_path: "assets/icon-192.png"
+  min_sdk_android: 21
+  web:
+    generate: true
+    image_path: "assets/icon-192.png"
+    background_color: "#0A0A0A"
+    theme_color: "#22D3EE"
+  windows:
+    generate: true
+    image_path: "assets/icon-192.png"
+    icon_size: 256
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/icon-192.png
+
+  # Hostinger Design System uses DM Sans (display) and Noto Sans (body)
+  fonts:
+    - family: DM Sans
+      fonts:
+        - asset: assets/fonts/DMSans-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/DMSans-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/DMSans-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/DMSans-Bold.ttf
+          weight: 700
+    - family: Noto Sans
+      fonts:
+        - asset: assets/fonts/NotoSans-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/NotoSans-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/NotoSans-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/NotoSans-Bold.ttf
+          weight: 700

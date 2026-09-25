@@ -1,0 +1,394 @@
+import 'package:flutter/foundation.dart';
+import '../utils/hive/hive_provider.dart';
+import 'dart:convert';
+import '../utils/platform_helper.dart'; // compile-time conditional
+
+import '../models/models.dart';
+import '../models/addon_models.dart';
+
+/// Settings service - matches original Python Settings class
+/// Handles theme, download location, play history, user credentials
+class SettingsService extends ChangeNotifier {
+  static const String _boxName = 'metmusic_settings';
+  late Box _box;
+
+  bool _initialized = false;
+  bool get isInitialized => _initialized;
+
+  // Settings keys
+  static const String _keyTheme = 'theme';
+  static const String _keyDownloadLocation = 'download_location';
+  static const String _keyPlayHistory = 'play_history';
+  static const String _keyUser = 'user';
+
+  static const String _keyDownloadedTracks = 'downloaded_tracks';
+  // New: Store Track metadata (ID -> JSON)
+  static const String _keyDownloadedTracksMeta = 'downloaded_tracks_meta';
+  // Addon system
+  static const String _keyAddonsList = 'addons_list';
+  static const String _keyActiveAddonId = 'active_addon_id';
+  static const String _keyRemovedBuiltins = 'removed_builtins';
+  static const String _keyTidalApiBase = 'tidal_api_base';
+  static const String _keyPlaybackQuality = 'playback_quality';
+  static const String _keyAccountApiBase = 'account_api_base';
+  static const String _keySessionCookie = 'session_cookie';
+
+  Future<void> init() async {
+    _box = await Hive.openBox(_boxName);
+    _initialized = true;
+    notifyListeners();
+  }
+
+  // ========== Theme ==========
+  bool get isDarkMode => (_box.get(_keyTheme, defaultValue: 'dark')) == 'dark';
+
+  String get theme => _box.get(_keyTheme, defaultValue: 'dark');
+
+  Future<void> setTheme(String theme) async {
+    await _box.put(_keyTheme, theme);
+    notifyListeners();
+  }
+
+  Future<void> toggleTheme() async {
+    await setTheme(isDarkMode ? 'light' : 'dark');
+  }
+
+  // ========== Download Location ==========
+  Future<String> getDownloadLocation() async {
+    // On web, downloads go directly via browser download dialog
+    if (kIsWeb) return 'browser';
+
+    String? saved = _box.get(_keyDownloadLocation);
+    if (saved != null && saved.isNotEmpty) {
+      return saved;
+    }
+
+    // Default: platform-specific Music folder
+    if (PlatformHelper.isAndroid) {
+      return '/storage/emulated/0/Music/MetMusic';
+    } else if (PlatformHelper.isWindows) {
+      return _getWindowsMusicPath();
+    } else if (PlatformHelper.isLinux || PlatformHelper.isMacOS) {
+      return _getUnixMusicPath();
+    }
+    return 'downloads';
+  }
+
+  String _getWindowsMusicPath() =>
+      PlatformHelper.getEnv('USERPROFILE', fallback: '') + r'\Music\MetMusic';
+
+  String _getUnixMusicPath() =>
+      '${PlatformHelper.getEnv('HOME', fallback: '')}/Music/MetMusic';
+
+  Future<void> setDownloadLocation(String path) async {
+    await _box.put(_keyDownloadLocation, path);
+    notifyListeners();
+  }
+
+  // ========== Play History ==========
+  List<Track> getPlayHistory() {
+    final historyJson = _box.get(_keyPlayHistory, defaultValue: '[]');
+    try {
+      final List<dynamic> list = jsonDecode(historyJson);
+      return list.map((t) => Track.fromJson(t)).toList();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Future<void> setPlayHistory(List<Track> history) async {
+    final jsonList = history.map((t) => t.toJson()).toList();
+    await _box.put(_keyPlayHistory, jsonEncode(jsonList));
+    notifyListeners();
+  }
+
+  Future<void> addToPlayHistory(Track track) async {
+    final history = getPlayHistory();
+    // Remove if already exists
+    history.removeWhere((t) => t.id == track.id);
+    // Add to front
+    history.insert(0, track);
+    // Keep last 5
+    final trimmed = history.take(5).toList();
+    await setPlayHistory(trimmed);
+  }
+
+  // ========== User / Auth ==========
+  User? getUser() {
+    final userJson = _box.get(_keyUser);
+    if (userJson != null && userJson.isNotEmpty) {
+      try {
+        return User.fromJson(jsonDecode(userJson));
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  Future<void> saveUser(User user) async {
+    await _box.put(_keyUser, jsonEncode(user.toJson()));
+    notifyListeners();
+  }
+
+  Future<void> clearUser() async {
+    await _box.delete(_keyUser);
+    notifyListeners();
+  }
+
+  bool get isLoggedIn => getUser() != null;
+  String? get authToken => getUser()?.token;
+
+  // ========== Downloaded Tracks Registry ==========
+  Map<String, String> getDownloadedTracks() {
+    final data = _box.get(_keyDownloadedTracks, defaultValue: '{}');
+    try {
+      return Map<String, String>.from(jsonDecode(data));
+    } catch (e) {
+      return {};
+    }
+  }
+
+  Future<void> registerDownload(String trackId, String filePath,
+      {Track? track}) async {
+    final downloads = getDownloadedTracks();
+    downloads[trackId] = filePath;
+    await _box.put(_keyDownloadedTracks, jsonEncode(downloads));
+
+    if (track != null) {
+      final meta = getDownloadedTracksMeta();
+      meta[trackId] = track.toJson();
+      await _box.put(_keyDownloadedTracksMeta, jsonEncode(meta));
+    }
+    notifyListeners();
+  }
+
+  // Get metadata map
+  Map<String, dynamic> getDownloadedTracksMeta() {
+    final data = _box.get(_keyDownloadedTracksMeta, defaultValue: '{}');
+    try {
+      return Map<String, dynamic>.from(jsonDecode(data));
+    } catch (e) {
+      return {};
+    }
+  }
+
+  // Get list of downloaded tracks
+  List<Track> getDownloadedTracksList() {
+    final meta = getDownloadedTracksMeta();
+    final fileMap = getDownloadedTracks();
+
+    // Filter out tracks that definitely don't have files (orphaned meta),
+    // or keep them if you trust sync. Best to intersect.
+
+    List<Track> tracks = [];
+    meta.forEach((key, value) {
+      if (fileMap.containsKey(key)) {
+        try {
+          tracks.add(Track.fromJson(value));
+        } catch (e) {
+          print("Error parsing track meta for $key: $e");
+        }
+      }
+    });
+
+    // Sort by name or date? Unordered for now.
+    return tracks;
+  }
+
+  Future<void> unregisterDownload(String trackId) async {
+    final downloads = getDownloadedTracks();
+    downloads.remove(trackId);
+    await _box.put(_keyDownloadedTracks, jsonEncode(downloads));
+
+    // Remove meta
+    final meta = getDownloadedTracksMeta();
+    meta.remove(trackId);
+    await _box.put(_keyDownloadedTracksMeta, jsonEncode(meta));
+
+    notifyListeners();
+  }
+
+  String? getLocalPath(String trackId) {
+    return getDownloadedTracks()[trackId];
+  }
+
+  bool isDownloaded(String trackId) {
+    if (kIsWeb) return false; // No local files on web
+    final path = getLocalPath(trackId);
+    if (path == null) return false;
+    return PlatformHelper.fileExists(path);
+  }
+
+  int get downloadedCount => getDownloadedTracks().length;
+
+  Future<int> getStorageSize() async {
+    if (kIsWeb) return 0; // No local filesystem on web
+    final downloads = getDownloadedTracks();
+    int total = 0;
+    for (final path in downloads.values) {
+      total += PlatformHelper.fileSize(path);
+    }
+    return total;
+  }
+
+  Future<void> clearCache() async {
+    final downloads = getDownloadedTracks();
+    if (!kIsWeb) {
+      for (final path in downloads.values) {
+        try {
+          PlatformHelper.deleteFile(path);
+        } catch (e) {
+          print('Error deleting $path: $e');
+        }
+      }
+    }
+    await _box.put(_keyDownloadedTracks, '{}');
+    notifyListeners();
+  }
+
+  // ========== Addon System ==========
+
+  List<AddonManifest> loadAddons() {
+    final dataString = _box.get(_keyAddonsList);
+    if (dataString == null || dataString.isEmpty) return [];
+
+    try {
+      final List<dynamic> jsonList = jsonDecode(dataString);
+      return jsonList.map((item) => AddonManifest.fromJson(item)).toList();
+    } catch (e) {
+      print('[SettingsService] Failed to load addons: $e');
+      return [];
+    }
+  }
+
+  Future<void> saveAddons(List<AddonManifest> addons) async {
+    final jsonList = addons.map((a) => a.toJson()).toList();
+    await _box.put(_keyAddonsList, jsonEncode(jsonList));
+  }
+
+  String? getActiveAddonId() {
+    return _box.get(_keyActiveAddonId);
+  }
+
+  Future<void> setActiveAddonId(String id) async {
+    await _box.put(_keyActiveAddonId, id);
+  }
+
+  // ========== Removed Built-ins ==========
+
+  List<String> getRemovedBuiltins() {
+    final data = _box.get(_keyRemovedBuiltins, defaultValue: []);
+    return List<String>.from(data);
+  }
+
+  bool isBuiltinRemoved(String id) {
+    return getRemovedBuiltins().contains(id);
+  }
+
+  Future<void> markBuiltinRemoved(String id) async {
+    final removed = getRemovedBuiltins();
+    if (!removed.contains(id)) {
+      removed.add(id);
+      await _box.put(_keyRemovedBuiltins, removed);
+      notifyListeners();
+    }
+  }
+
+  Future<void> markBuiltinRestored(String id) async {
+    final removed = getRemovedBuiltins();
+    if (removed.contains(id)) {
+      removed.remove(id);
+      await _box.put(_keyRemovedBuiltins, removed);
+      notifyListeners();
+    }
+  }
+
+  // ========== Tidal API Base URL ==========
+
+  String get tidalApiBase => _box.get(_keyTidalApiBase,
+      defaultValue: 'https://hzloipljzbnammznxfnz.functions.supabase.co/api');
+
+  Future<void> setTidalApiBase(String url) async {
+    await _box.put(_keyTidalApiBase, url.trim());
+    notifyListeners();
+  }
+
+  // ========== Playback Source (Tidal / JioSaavn) ==========
+
+  static const String _keyPlaybackSource = 'playback_source';
+
+  /// Where audio playback is sourced from:
+  ///   'tidal'      — Tidal catalog (default, unchanged behaviour)
+  ///   'jiosaavn'   — JioSaavn playback only (catalog still Tidal)
+  ///
+  /// Legacy stored values of 'youtube' are treated as 'jiosaavn', since the
+  /// YouTube Music playback was replaced by JioSaavn.
+  String get playbackSource {
+    final stored = _box.get(_keyPlaybackSource, defaultValue: 'tidal');
+    return (stored == 'youtube' || stored == 'jiosaavn') ? 'jiosaavn' : 'tidal';
+  }
+
+  bool get isJioSaavnSource => playbackSource == 'jiosaavn';
+
+  Future<void> setPlaybackSource(String source) async {
+    await _box.put(_keyPlaybackSource,
+        (source == 'youtube' || source == 'jiosaavn') ? 'jiosaavn' : 'tidal');
+    notifyListeners();
+  }
+
+  // ========== Playback Quality ==========
+
+  String get playbackQuality =>
+      _box.get(_keyPlaybackQuality, defaultValue: 'HI_RES_LOSSLESS');
+
+  Future<void> setPlaybackQuality(String quality) async {
+    await _box.put(_keyPlaybackQuality, quality);
+    notifyListeners();
+  }
+
+  // ========== Lyrics Mode ==========
+  // 'standard'   -> clean left-aligned synchronized lyrics (default)
+  // 'visualizer' -> animated backdrop + glowing, detailed line animations
+
+  static const String _keyLyricsMode = 'lyrics_mode';
+
+  String get lyricsMode =>
+      _box.get(_keyLyricsMode, defaultValue: 'standard');
+
+  Future<void> setLyricsMode(String mode) async {
+    await _box.put(_keyLyricsMode, mode == 'visualizer' ? 'visualizer' : 'standard');
+    notifyListeners();
+  }
+
+  // ========== Account (MetMusic Private) ==========
+
+  String get accountApiBase {
+    final stored = _box.get(_keyAccountApiBase);
+    if (stored != null &&
+        stored.contains('metmusic-priv.netlify.app')) {
+      final migrated = stored.replaceAll(
+          'metmusic-priv.netlify.app', 'hifi-web-player-private.vercel.app');
+      _box.put(_keyAccountApiBase, migrated);
+      return migrated;
+    }
+    return stored ?? 'https://hifi-web-player-private.vercel.app';
+  }
+
+  Future<void> setAccountApiBase(String url) async {
+    await _box.put(_keyAccountApiBase, url.trim());
+    notifyListeners();
+  }
+
+  String? get sessionCookie => _box.get(_keySessionCookie);
+
+  Future<void> setSessionCookie(String cookie) async {
+    await _box.put(_keySessionCookie, cookie);
+    notifyListeners();
+  }
+
+  Future<void> clearSessionCookie() async {
+    await _box.delete(_keySessionCookie);
+    notifyListeners();
+  }
+}

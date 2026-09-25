@@ -1,0 +1,6 @@
+# Copy this file to android/key.properties for a locally signed release.
+# Never commit the real file or its keystore.
+storePassword=CHANGE_ME
+keyPassword=CHANGE_ME
+keyAlias=metmusic
+storeFile=upload-keystore.jks

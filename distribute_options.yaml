@@ -1,0 +1,23 @@
+output: dist/
+releases:
+  - name: production
+    jobs:
+      - name: linux-deb
+        package:
+          platform: linux
+          target: deb
+          build_args:
+            dart-define:
+              APP_VERSION: 1.0.0
+        # Config for the DEB installer
+        package_id: com.metmusic.app
+        app_name: metmusic
+        display_name: MetMusic
+        maintainer: TheVolecitor
+      
+      - name: linux-appimage
+        package:
+          platform: linux
+          target: appimage
+        app_name: metmusic
+        display_name: MetMusic

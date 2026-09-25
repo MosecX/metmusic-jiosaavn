@@ -10,6 +10,7 @@ import '../../core/services/addon_service.dart';
 import '../../core/services/connectivity_service.dart';
 import '../../core/services/download_manager_service.dart';
 import '../../core/services/jiosaavn_service.dart';
+import '../../core/services/turso_client.dart';
 import '../../core/models/addon_models.dart';
 import '../auth/auth_screen.dart';
 import '../shared/offline_banner.dart';
@@ -78,8 +79,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: _SettingsSection(
                     title: 'Playback',
                     children: [
-                      _PlaybackSourceTile(),
-                      _SectionDivider(),
                       _QualityTile(),
                       _SectionDivider(),
                       _LyricsModeTile(),
@@ -106,8 +105,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       _SectionDivider(),
                       _ServerStatusTile(
                         icon: Icons.cloud_outlined,
-                        title: 'Account server',
-                        probe: () => _probeAccountServer(settings),
+                        title: 'Account database (Turso)',
+                        probe: _probeAccountDatabase,
                       ),
                       _SectionDivider(),
                       _ConnectionTile(),
@@ -189,28 +188,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
   }
 
-  Future<ApiHealthStatus?> _probeAccountServer(SettingsService settings) async {
-    final dio = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 6),
-      receiveTimeout: const Duration(seconds: 6),
-      headers: {'Accept': 'application/json'},
-    ));
+  /// Probes the Turso account database with a trivial SQL round-trip.
+  Future<ApiHealthStatus?> _probeAccountDatabase() async {
     final stopwatch = Stopwatch()..start();
     try {
-      final res = await dio.get('${settings.accountApiBase}/api/auth/me');
+      await tursoExecuteOne(
+        TursoClient(
+          url: AccountService.dbUrl,
+          authToken: AccountService.authToken,
+        ),
+        'SELECT 1 AS ok',
+        const [],
+      );
       stopwatch.stop();
       return ApiHealthStatus(
-        online: res.statusCode == 200,
-        error: res.statusCode == 200 ? null : 'HTTP ${res.statusCode}',
+        online: true,
         latencyMs: stopwatch.elapsedMilliseconds,
       );
     } catch (e) {
       stopwatch.stop();
       return ApiHealthStatus(
         online: false,
-        error: e is DioException && e.response != null
-            ? 'HTTP ${e.response?.statusCode}'
-            : null,
+        error: e.toString(),
         latencyMs: stopwatch.elapsedMilliseconds,
       );
     }
@@ -387,59 +386,7 @@ class _AccountTile extends StatelessWidget {
       },
     );
   }
-}// ── Playback Source Tile ───────────────────────────────────────────────
-class _PlaybackSourceTile extends StatelessWidget {
-  const _PlaybackSourceTile();
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ListTile(
-          leading: Icon(Icons.source_outlined, color: cs.onSurfaceVariant, size: 20),
-          title: Text('Fuente de reproducción',
-              style: TextStyle(color: cs.onSurface)),
-          subtitle: Text(
-            'JioSaavn — única fuente: catálogo, metadatos y audio (hasta 320 kbps)',
-            style: TextStyle(color: cs.onSurfaceVariant),
-          ),
-          trailing: const _PillBadge(label: 'JioSaavn'),
-        ),
-        Padding(
-          padding: EdgeInsets.fromLTRB(
-            AppTheme.space3,
-            0,
-            AppTheme.space3,
-            AppTheme.space2,
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(Icons.info_outline, size: 14, color: AppTheme.warning),
-              const SizedBox(width: AppTheme.space2),
-              Expanded(
-                child: Text(
-                  'Esta versión reproduce 100% desde JioSaavn: cada canción, '
-                  'álbum, artista y playlist proviene del catálogo de JioSaavn '
-                  'y el audio se transmite desde su CDN.',
-                  style: TextStyle(
-                    color: cs.onSurfaceVariant,
-                    fontSize: 11,
-                    height: 1.4,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ── Pill Badge (shared by Playback + Quality tiles) ───────────────────
+}// ── Pill Badge (shared by Playback + Quality tiles) ───────────────────
 class _PillBadge extends StatelessWidget {
   final String label;
   const _PillBadge({required this.label});
@@ -476,10 +423,10 @@ class _QualityTile extends StatelessWidget {
       leading: Icon(Icons.high_quality_outlined, color: cs.onSurfaceVariant, size: 20),
       title: Text('Calidad de audio', style: TextStyle(color: cs.onSurface)),
       subtitle: Text(
-        'MP4/AAC · hasta 320 kbps (según disponibilidad de JioSaavn)',
+        'AAC · hasta 320 kbps, según disponibilidad por pista',
         style: TextStyle(color: cs.onSurfaceVariant),
       ),
-      trailing: const _PillBadge(label: 'JioSaavn'),
+      trailing: const _PillBadge(label: 'Referencia'),
     );
   }
 }

@@ -4,6 +4,17 @@ import 'package:flutter/foundation.dart';
 
 import 'des_ecb.dart';
 
+/// Upgrades a JioSaavn CDN image URL to the given square size. The API returns
+/// 150x150 (or 50x50) thumbnails; the CDN also hosts 500x500 and 50x50
+/// renditions of the same asset, so the size token can be rewritten safely.
+/// Falls back to the original URL when it doesn't match the expected pattern.
+String jioSaavnImage(String? url, {int size = 500}) {
+  final u = url?.toString() ?? '';
+  if (u.isEmpty) return u;
+  final scaled = u.replaceFirst(RegExp(r'\d+x\d+(?=\.jpg\$)'), '${size}x$size');
+  return scaled;
+}
+
 /// A song row returned by the JioSaavn songs search.
 @immutable
 class JioSaavnSong {
@@ -200,7 +211,7 @@ class JioSaavnService {
       album: moreMap['album']?.toString(),
       durationSeconds:
           int.tryParse((moreMap['duration'] ?? raw['duration'])?.toString() ?? ''),
-      thumbnailUrl: raw['image']?.toString(),
+      thumbnailUrl: jioSaavnImage(raw['image']),
       encryptedMediaUrl: enc,
     );
   }

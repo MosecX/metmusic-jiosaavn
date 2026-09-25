@@ -145,7 +145,7 @@ class JioSaavnAddonHandler extends UserAddonHandler {
         id: data['token']?.toString() ?? albumToken,
         title: data['title']?.toString() ?? 'Unknown Album',
         artist: _subtitleArtist(data['subtitle']),
-        artworkURL: data['image']?.toString(),
+        artworkURL: jioSaavnImage(data['image']),
         trackCount: int.tryParse(data['song_count']?.toString() ?? ''),
         year: data['year']?.toString(),
         audioQuality: _quality,
@@ -168,7 +168,7 @@ class JioSaavnAddonHandler extends UserAddonHandler {
       return AddonArtist(
         id: artistToken,
         name: data['name']?.toString() ?? 'Unknown Artist',
-        artworkURL: data['image']?.toString(),
+        artworkURL: jioSaavnImage(data['image']),
         topTracks: topTracks,
         albums: albums,
         addonId: addonId,
@@ -188,7 +188,7 @@ class JioSaavnAddonHandler extends UserAddonHandler {
         id: data['token']?.toString() ?? playlistToken,
         title: data['title']?.toString() ?? 'Unknown Playlist',
         description: data['header_desc']?.toString(),
-        artworkURL: data['image']?.toString(),
+        artworkURL: jioSaavnImage(data['image']),
         creator: _subtitleArtist(data['subtitle']),
         trackCount: int.tryParse(data['list_count']?.toString() ?? ''),
         tracks: songs,
@@ -244,15 +244,29 @@ class JioSaavnAddonHandler extends UserAddonHandler {
   Future<ApiHealthStatus?> checkHealth() async {
     final stopwatch = Stopwatch()..start();
     try {
-      final data = await _getJson('', const {}, probe: true);
+      // The API root returns raw JavaScript (unquoted keys:
+      // `status: "active"`), not JSON — parsing it as a Map throws
+      // "type 'String' is not a subtype". Read the body as text and match
+      // the fields with a tolerant regex instead.
+      final res = await _dio.get<String>(
+        _base,
+        options: Options(
+          responseType: ResponseType.plain,
+          receiveTimeout: const Duration(seconds: 10),
+        ),
+      );
       stopwatch.stop();
-      final online = data['status']?.toString() == 'active';
+      final body = res.data ?? '';
+      final status = RegExp(r'status\s*:\s*"([^"]+)"').firstMatch(body)?.group(1);
+      final name = RegExp(r'name\s*:\s*"([^"]+)"').firstMatch(body)?.group(1);
+      final online = status == 'active' || body.contains('"status":"active"');
       return ApiHealthStatus(
         online: online,
-        version: data['name']?.toString(),
+        version: name,
         latencyMs: stopwatch.elapsedMilliseconds,
       );
     } catch (e) {
+      stopwatch.stop();
       return ApiHealthStatus(
         online: false,
         error: e.toString(),
@@ -272,7 +286,7 @@ class JioSaavnAddonHandler extends UserAddonHandler {
       artist: song?.artist ?? 'Unknown Artist',
       album: song?.album,
       duration: song?.durationSeconds,
-      artworkURL: raw['image']?.toString(),
+      artworkURL: jioSaavnImage(raw['image']),
       quality: _quality,
       artistId: null,
       albumId: (raw['more_info'] is Map)
@@ -288,7 +302,7 @@ class JioSaavnAddonHandler extends UserAddonHandler {
       id: raw['token']?.toString() ?? raw['id']?.toString() ?? '',
       title: raw['title']?.toString() ?? 'Unknown Album',
       artist: _subtitleArtist(raw['subtitle']),
-      artworkURL: raw['image']?.toString(),
+      artworkURL: jioSaavnImage(raw['image']),
       trackCount: int.tryParse(raw['song_count']?.toString() ?? ''),
       year: raw['year']?.toString(),
       type: raw['type']?.toString(),
@@ -301,7 +315,7 @@ class JioSaavnAddonHandler extends UserAddonHandler {
     return AddonArtist(
       id: raw['token']?.toString() ?? raw['id']?.toString() ?? '',
       name: raw['name']?.toString() ?? 'Unknown Artist',
-      artworkURL: raw['image']?.toString(),
+      artworkURL: jioSaavnImage(raw['image']),
       addonId: addonId,
     );
   }
@@ -312,7 +326,7 @@ class JioSaavnAddonHandler extends UserAddonHandler {
       id: raw['token']?.toString() ?? raw['id']?.toString() ?? '',
       title: raw['title']?.toString() ?? 'Unknown Playlist',
       description: raw['header_desc']?.toString(),
-      artworkURL: raw['image']?.toString(),
+      artworkURL: jioSaavnImage(raw['image']),
       creator: _subtitleArtist(raw['subtitle']),
       trackCount: int.tryParse(RegExp(r'\d+')
               .firstMatch(raw['subtitle']?.toString() ?? '')

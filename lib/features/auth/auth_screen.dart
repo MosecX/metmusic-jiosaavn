@@ -79,7 +79,8 @@ class _AuthScreenState extends State<AuthScreen> {
     final cs = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
     final account = context.watch<AccountService>();
-    final blocked = account.isLoggedIn && !account.isApproved;
+    // Built-in accounts are always active — no approval gate.
+    final blocked = false;
 
     return PlayerShell(
       child: Scaffold(
@@ -115,8 +116,8 @@ class _AuthScreenState extends State<AuthScreen> {
                   const SizedBox(height: 6),
                   Text(
                     _isRegister
-                        ? 'Crea tu cuenta para desbloquear la música'
-                        : 'Inicia sesión para reproducir en calidad Hi-Fi',
+                        ? 'Crea tu cuenta para empezar a escuchar'
+                        : 'Inicia sesión para continuar escuchando',
                     textAlign: TextAlign.center,
                     style: text.bodyMedium?.copyWith(
                       color: cs.onSurfaceVariant,
@@ -206,8 +207,9 @@ class _AuthScreenState extends State<AuthScreen> {
                     const SizedBox(height: 16),
                     Text(
                       _isRegister
-                          ? 'Tu cuenta queda pendiente de aprobación por un administrador.'
-                          : 'Solo usuarios aprobados pueden reproducir.',
+                          ? 'Tu cuenta se activa al instante. Guarda tus favoritos '
+                              'y playlists en la nube.'
+                          : 'Accede a tus favoritos y playlists en cualquier dispositivo.',
                       textAlign: TextAlign.center,
                       style: text.bodySmall?.copyWith(
                         color: cs.onSurfaceVariant,

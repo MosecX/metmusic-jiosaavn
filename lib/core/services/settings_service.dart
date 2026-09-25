@@ -364,15 +364,28 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
-  String? get sessionCookie => _box.get(_keySessionCookie);
+  // ========== Built-in account session (Turso-backed) ==========
 
-  Future<void> setSessionCookie(String cookie) async {
-    await _box.put(_keySessionCookie, cookie);
+  static const String _keyStoredUserId = 'stored_user_id';
+  static const String _keyStoredUsername = 'stored_username';
+
+  int? get storedUserId {
+    final v = _box.get(_keyStoredUserId);
+    if (v is int) return v;
+    return int.tryParse(v?.toString() ?? '');
+  }
+
+  String? get storedUsername => _box.get(_keyStoredUsername)?.toString();
+
+  Future<void> setStoredUser(int id, String username) async {
+    await _box.put(_keyStoredUserId, id);
+    await _box.put(_keyStoredUsername, username);
     notifyListeners();
   }
 
-  Future<void> clearSessionCookie() async {
-    await _box.delete(_keySessionCookie);
+  Future<void> clearStoredUser() async {
+    await _box.delete(_keyStoredUserId);
+    await _box.delete(_keyStoredUsername);
     notifyListeners();
   }
 }

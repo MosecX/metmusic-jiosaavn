@@ -1,15 +1,33 @@
 import 'dart:async';
-import 'package:dio/dio.dart';
+import 'dart:convert';
+import 'dart:math';
+import 'dart:typed_data';
+
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/account_models.dart';
 import '../models/models.dart';
 import 'settings_service.dart';
 import 'jiosaavn_addon_handler.dart';
+import 'turso_client.dart';
 
+/// Account service backed directly by the project's Turso (libSQL) database —
+/// no intermediate auth server. The schema is created on demand from the app
+/// and passwords are stored as PBKDF2-HMAC-SHA256 hashes with per-user salts.
+///
+/// Every new account is active immediately (there is no external approver).
 class AccountService extends ChangeNotifier {
+  /// Turso database used by the built-in account system. Public so the
+  /// settings screen can probe connectivity.
+  static const String dbUrl = 'libsql://metmusic-jiosaavn-mosecx.aws-us-east-1.turso.io';
+  static const String authToken =
+      'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTAzNzczOTcsImlkIjoiMDFhMGRhYWUtNWMwMS03NDQ5LWI5MzMtNjZkZGI3ODhjOTFlIiwia2lkIjoiYzlpa0p2Y1Ixb2VGOFJaZ3BnS0RMTWE3OGJYNWhsUktxY0UzS3U3ellNbyIsInJpZCI6IjI5ZTJmMjZkLWFiYTMtNGM5Ny1hOWFhLWU2MTI2ZjBhMTFjOSJ9.LcCbSflECiR3f4q9fbF93ebw2U9Olor5gGKYZ8E9FS_3bXLntej6xitqoMz42mQiIZZYCO1NXapyVmc9ZH6SAA';
+
+  static const int _pbkdf2Iterations = 60000;
+
   final SettingsService _settings;
-  final Dio _dio;
+  late final TursoClient _turso;
 
   AccountUser? _user;
   List<FavoriteRow> _favorites = [];
@@ -18,36 +36,15 @@ class AccountService extends ChangeNotifier {
   String? _error;
 
   AccountService({required SettingsService settingsService})
-      : _settings = settingsService,
-        _dio = Dio(BaseOptions(
-          connectTimeout: const Duration(seconds: 10),
-          receiveTimeout: const Duration(seconds: 25),
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-          },
-        ));
-
-  String get _base => _settings.accountApiBase;
-
-  String? get _cookie => _settings.sessionCookie;
-
-  Options get _authOptions {
-    if (kIsWeb) {
-      return Options(extra: {'withCredentials': true});
-    }
-    return Options(
-      headers: {
-        if (_cookie != null) 'Cookie': 'session=$_cookie',
-      },
-    );
+      : _settings = settingsService {
+    _turso = TursoClient(url: dbUrl, authToken: authToken);
   }
 
   AccountUser? get user => _user;
   bool get isLoggedIn => _user != null;
-  bool get isApproved => _user?.isApproved ?? false;
-  bool get isPending => _user?.isPending ?? false;
-  bool get isRejected => _user?.isRejected ?? false;
+  bool get isApproved => _user != null; // Built-in accounts are always active.
+  bool get isPending => false;
+  bool get isRejected => false;
   bool get loading => _loading;
   String? get error => _error;
   List<FavoriteRow> get favorites => _favorites;
@@ -62,36 +59,90 @@ class AccountService extends ChangeNotifier {
   bool isFavorite(String type, String itemId) =>
       _favorites.any((f) => f.itemType == type && f.itemId == itemId);
 
+  // ========== SCHEMA (created on demand) ==========
+
+  bool _schemaReady = false;
+
+  Future<void> _ensureSchema() async {
+    if (_schemaReady) return;
+    await tursoExecute(_turso, [
+      (
+        sql: '''
+        CREATE TABLE IF NOT EXISTS users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+          email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+          password_hash TEXT NOT NULL,
+          salt TEXT NOT NULL,
+          role TEXT NOT NULL DEFAULT 'user',
+          created_at TEXT NOT NULL
+        )''',
+        args: const [],
+      ),
+      (
+        sql: '''
+        CREATE TABLE IF NOT EXISTS favorites (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          item_type TEXT NOT NULL,
+          item_id TEXT NOT NULL,
+          data TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL,
+          UNIQUE(user_id, item_type, item_id)
+        )''',
+        args: const [],
+      ),
+      (
+        sql: '''
+        CREATE TABLE IF NOT EXISTS playlists (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL
+        )''',
+        args: const [],
+      ),
+      (
+        sql: '''
+        CREATE TABLE IF NOT EXISTS playlist_tracks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+          track_id TEXT NOT NULL,
+          position INTEGER NOT NULL DEFAULT 0,
+          data TEXT NOT NULL DEFAULT '{}',
+          created_at TEXT NOT NULL,
+          UNIQUE(playlist_id, track_id)
+        )''',
+        args: const [],
+      ),
+    ]);
+    _schemaReady = true;
+  }
+
+  // ========== SESSION RESTORE ==========
+
   Future<void> init() async {
-    if (kIsWeb || _settings.sessionCookie != null) {
-      final ok = await _fetchMe();
-      if (ok) {
-        await loadFavorites();
+    await _ensureSchema();
+    final savedId = _settings.storedUserId;
+    final savedName = _settings.storedUsername;
+    if (savedId != null && savedName != null && savedName.isNotEmpty) {
+      final rows = await tursoExecuteOne(
+        _turso,
+        'SELECT id, username, email, role, created_at FROM users WHERE id = ?',
+        [savedId],
+      );
+      if (rows.rows.isNotEmpty) {
+        _user = _userFromRow(rows.rows.first);
+        unawaited(loadFavorites());
+      } else {
+        await _clearStoredUser();
       }
     }
     notifyListeners();
   }
 
-  Future<bool> _fetchMe() async {
-    try {
-      final res = await _dio.get('$_base/api/auth/me', options: _authOptions);
-      final data = res.data;
-      if (data is Map && data['user'] is Map) {
-        _user = AccountUser.fromJson(Map<String, dynamic>.from(data['user']));
-        notifyListeners();
-        return true;
-      }
-      _user = null;
-      await _settings.clearSessionCookie();
-    } catch (e) {
-      _user = null;
-      if (e is DioException && e.response?.statusCode == 401) {
-        await _settings.clearSessionCookie();
-      }
-    }
-    notifyListeners();
-    return _user != null;
-  }
+  // ========== AUTH ==========
 
   Future<bool> login({
     required String identifier,
@@ -101,35 +152,43 @@ class AccountService extends ChangeNotifier {
     _error = null;
     notifyListeners();
     try {
-      final res = await _dio.post('$_base/api/auth/login', data: {
-        'identifier': identifier,
-        'password': password,
-      });
-      final data = res.data is Map ? Map<String, dynamic>.from(res.data) : {};
-      final user = data['user'];
-      if (user is Map) {
-        _user = AccountUser.fromJson(Map<String, dynamic>.from(user));
-        final setCookie = res.headers.value('set-cookie');
-        if (setCookie != null) {
-          final m = RegExp(r'session=([^;]+)').firstMatch(setCookie);
-          if (m != null) {
-            await _settings.setSessionCookie(m.group(1)!);
-          }
-        }
-        _loading = false;
-        notifyListeners();
-        unawaited(loadFavorites());
-        return true;
+      await _ensureSchema();
+      final res = await tursoExecuteOne(
+        _turso,
+        'SELECT id, username, email, role, password_hash, salt, created_at '
+        'FROM users WHERE username = ? OR email = ? LIMIT 1',
+        [identifier.trim(), identifier.trim().toLowerCase()],
+      );
+      final row = res.rows.isEmpty ? null : res.rows.first;
+      final hash = row?['password_hash']?.toString();
+      final salt = row?['salt']?.toString();
+
+      if (row == null || hash == null || salt == null) {
+        _error = 'Usuario o contraseña incorrectos';
+        return false;
       }
-      _error = 'Respuesta inválida del servidor';
-    } on DioException catch (e) {
-      _error = _messageFrom(e);
+
+      final computed = _hashPassword(password, salt);
+      if (!_constantTimeEquals(computed, hash)) {
+        _error = 'Usuario o contraseña incorrectos';
+        return false;
+      }
+
+      _user = _userFromRow(row);
+      await _storeUser();
+      unawaited(loadFavorites());
+      return true;
+    } on TursoException catch (e) {
+      _error = e.message;
+      return false;
     } catch (e) {
-      _error = e.toString();
+      print('[Account] login error: $e');
+      _error = 'Error de conexión con la base de datos';
+      return false;
+    } finally {
+      _loading = false;
+      notifyListeners();
     }
-    _loading = false;
-    notifyListeners();
-    return false;
   }
 
   Future<bool> register({
@@ -141,46 +200,82 @@ class AccountService extends ChangeNotifier {
     _error = null;
     notifyListeners();
     try {
-      final res = await _dio.post('$_base/api/auth/register', data: {
-        'username': username,
-        'email': email,
-        'password': password,
-      });
-      final data = res.data is Map ? Map<String, dynamic>.from(res.data) : {};
-      final user = data['user'];
-      if (user is Map) {
-        _user = AccountUser.fromJson(Map<String, dynamic>.from(user));
-        final setCookie = res.headers.value('set-cookie');
-        if (setCookie != null) {
-          final m = RegExp(r'session=([^;]+)').firstMatch(setCookie);
-          if (m != null) {
-            await _settings.setSessionCookie(m.group(1)!);
-          }
-        }
-        _loading = false;
-        notifyListeners();
-        unawaited(loadFavorites());
-        return true;
+      await _ensureSchema();
+
+      final name = username.trim();
+      final mail = email.trim().toLowerCase();
+
+      if (name.isEmpty || !name.contains(RegExp(r'^[a-zA-Z0-9_.-]+$'))) {
+        _error = 'El usuario solo puede contener letras, números, . _ -';
+        return false;
       }
-      _error = 'Respuesta inválida del servidor';
-    } on DioException catch (e) {
-      _error = _messageFrom(e);
+      if (!mail.contains('@')) {
+        _error = 'Ingresa un email válido';
+        return false;
+      }
+      if (password.length < 6) {
+        _error = 'La contraseña debe tener al menos 6 caracteres';
+        return false;
+      }
+
+      final existing = await tursoExecuteOne(
+        _turso,
+        'SELECT id FROM users WHERE username = ? OR email = ? LIMIT 1',
+        [name, mail],
+      );
+      if (existing.rows.isNotEmpty) {
+        _error = 'Ese usuario o correo ya está registrado';
+        return false;
+      }
+
+      final salt = _randomSalt();
+      final hash = _hashPassword(password, salt);
+      final now = DateTime.now().toUtc().toIso8601String();
+
+      final insert = await tursoExecuteOne(
+        _turso,
+        'INSERT INTO users (username, email, password_hash, salt, role, created_at) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        [name, mail, hash, salt, 'user', now],
+      );
+
+      final id = insert.lastInsertId;
+      if (id == null) {
+        _error = 'No se pudo crear la cuenta';
+        return false;
+      }
+
+      final row = await tursoExecuteOne(
+        _turso,
+        'SELECT id, username, email, role, created_at FROM users WHERE id = ?',
+        [id],
+      );
+      _user = _userFromRow(row.rows.first);
+      await _storeUser();
+      unawaited(loadFavorites());
+      return true;
+    } on TursoException catch (e) {
+      if (e.message.contains('UNIQUE')) {
+        _error = 'Ese usuario o correo ya está registrado';
+      } else {
+        _error = e.message;
+      }
+      return false;
     } catch (e) {
-      _error = e.toString();
+      print('[Account] register error: $e');
+      _error = 'Error de conexión con la base de datos';
+      return false;
+    } finally {
+      _loading = false;
+      notifyListeners();
     }
-    _loading = false;
-    notifyListeners();
-    return false;
   }
 
   Future<void> logout() async {
-    try {
-      await _dio.post('$_base/api/auth/logout', options: _authOptions);
-    } catch (_) {}
     _user = null;
     _favorites = [];
     _favoritesLoaded = false;
-    await _settings.clearSessionCookie();
+    await _clearStoredUser();
     notifyListeners();
   }
 
@@ -194,15 +289,13 @@ class AccountService extends ChangeNotifier {
       return;
     }
     try {
-      final res = await _dio.get('$_base/api/library/favorites',
-          options: _authOptions);
-      final data = res.data is Map ? Map<String, dynamic>.from(res.data) : {};
-      final list = data['favorites'] is List
-          ? List<dynamic>.from(data['favorites'])
-          : const [];
-      _favorites = list
-          .map((e) => FavoriteRow.fromJson(Map<String, dynamic>.from(e)))
-          .toList();
+      final res = await tursoExecuteOne(
+        _turso,
+        'SELECT id, item_type, item_id, data, created_at FROM favorites '
+        'WHERE user_id = ? ORDER BY created_at DESC, id DESC',
+        [_user!.id],
+      );
+      _favorites = res.rows.map(_favoriteFromRow).toList();
       _favoritesLoaded = true;
       notifyListeners();
     } catch (e) {
@@ -215,14 +308,15 @@ class AccountService extends ChangeNotifier {
     required String itemId,
     required Map<String, dynamic> data,
   }) async {
+    if (!isLoggedIn) return false;
     try {
-      await _dio.post('$_base/api/library/favorites',
-          data: {
-            'type': type,
-            'itemId': itemId,
-            'data': data,
-          },
-          options: _authOptions);
+      await tursoExecuteOne(
+        _turso,
+        'INSERT INTO favorites (user_id, item_type, item_id, data, created_at) '
+        'VALUES (?, ?, ?, ?, ?) '
+        'ON CONFLICT(user_id, item_type, item_id) DO NOTHING',
+        [_user!.id, type, itemId, jsonEncode(data), _now()],
+      );
       _favorites.insert(
           0, FavoriteRow(id: 0, itemType: type, itemId: itemId, data: data));
       notifyListeners();
@@ -237,12 +331,14 @@ class AccountService extends ChangeNotifier {
     required String type,
     required String itemId,
   }) async {
+    if (!isLoggedIn) return false;
     try {
-      await _dio.delete('$_base/api/library/favorites',
-          queryParameters: {'type': type, 'id': itemId},
-          options: _authOptions);
-      _favorites
-          .removeWhere((f) => f.itemType == type && f.itemId == itemId);
+      await tursoExecuteOne(
+        _turso,
+        'DELETE FROM favorites WHERE user_id = ? AND item_type = ? AND item_id = ?',
+        [_user!.id, type, itemId],
+      );
+      _favorites.removeWhere((f) => f.itemType == type && f.itemId == itemId);
       notifyListeners();
       return true;
     } catch (e) {
@@ -265,16 +361,15 @@ class AccountService extends ChangeNotifier {
   // ========== PLAYLISTS ==========
 
   Future<List<UserPlaylist>> getPlaylists() async {
+    if (!isLoggedIn) return [];
     try {
-      final res = await _dio.get('$_base/api/library/playlists',
-          options: _authOptions);
-      final data = res.data is Map ? Map<String, dynamic>.from(res.data) : {};
-      final list = data['playlists'] is List
-          ? List<dynamic>.from(data['playlists'])
-          : const [];
-      return list
-          .map((e) => UserPlaylist.fromJson(Map<String, dynamic>.from(e)))
-          .toList();
+      final res = await tursoExecuteOne(
+        _turso,
+        'SELECT id, name, description, created_at FROM playlists '
+        'WHERE user_id = ? ORDER BY created_at DESC, id DESC',
+        [_user!.id],
+      );
+      return res.rows.map(_playlistFromRow).toList();
     } catch (e) {
       print('[Account] getPlaylists error: $e');
       return [];
@@ -282,35 +377,51 @@ class AccountService extends ChangeNotifier {
   }
 
   Future<UserPlaylist?> createPlaylist(String name, {String description = ''}) async {
+    if (!isLoggedIn) return null;
     try {
-      final res = await _dio.post('$_base/api/library/playlists',
-          data: {'name': name, 'description': description},
-          options: _authOptions);
-      final data = res.data is Map ? Map<String, dynamic>.from(res.data) : {};
-      if (data['playlist'] is Map) {
-        return UserPlaylist.fromJson(Map<String, dynamic>.from(data['playlist']));
-      }
+      final insert = await tursoExecuteOne(
+        _turso,
+        'INSERT INTO playlists (user_id, name, description, created_at) '
+        'VALUES (?, ?, ?, ?)',
+        [_user!.id, name.trim(), description, _now()],
+      );
+      final id = insert.lastInsertId;
+      if (id == null) return null;
+      return UserPlaylist(
+        id: id,
+        name: name.trim(),
+        description: description,
+        createdAt: _now(),
+      );
     } catch (e) {
       print('[Account] createPlaylist error: $e');
+      return null;
     }
-    return null;
   }
 
   Future<(UserPlaylist, List<Track>)?> getPlaylistDetail(int id) async {
+    if (!isLoggedIn) return null;
     try {
-      final res = await _dio.get('$_base/api/library/playlists/$id',
-          options: _authOptions);
-      final data = res.data is Map ? Map<String, dynamic>.from(res.data) : {};
-      if (data['playlist'] is! Map) return null;
-      final playlist =
-          UserPlaylist.fromJson(Map<String, dynamic>.from(data['playlist']));
-      final list = data['tracks'] is List
-          ? List<dynamic>.from(data['tracks'])
-          : const [];
-      final tracks = list
-          .map((e) => PlaylistTrackRow.fromJson(Map<String, dynamic>.from(e)))
-          .map((r) => trackFromStored(r.data))
-          .toList();
+      final plRes = await tursoExecuteOne(
+        _turso,
+        'SELECT id, name, description, created_at FROM playlists WHERE id = ? AND user_id = ?',
+        [id, _user!.id],
+      );
+      if (plRes.rows.isEmpty) return null;
+
+      final trRes = await tursoExecuteOne(
+        _turso,
+        'SELECT track_id, data FROM playlist_tracks '
+        'WHERE playlist_id = ? ORDER BY position, id',
+        [id],
+      );
+
+      final playlist = _playlistFromRow(plRes.rows.first);
+      final tracks = trRes.rows.map((r) {
+        final data = _parseJsonMap(r['data']);
+        data['id'] ??= r['track_id']?.toString();
+        return trackFromStored(data);
+      }).toList();
       return (playlist, tracks);
     } catch (e) {
       print('[Account] getPlaylistDetail error: $e');
@@ -319,9 +430,13 @@ class AccountService extends ChangeNotifier {
   }
 
   Future<bool> deletePlaylist(int id) async {
+    if (!isLoggedIn) return false;
     try {
-      await _dio.delete('$_base/api/library/playlists/$id',
-          options: _authOptions);
+      await tursoExecute(_turso, [
+        (sql: 'DELETE FROM playlist_tracks WHERE playlist_id = ?', args: [id]),
+        (sql: 'DELETE FROM playlists WHERE id = ? AND user_id = ?',
+            args: [id, _user!.id]),
+      ]);
       return true;
     } catch (e) {
       print('[Account] deletePlaylist error: $e');
@@ -330,10 +445,28 @@ class AccountService extends ChangeNotifier {
   }
 
   Future<bool> addTrackToPlaylist(int id, Track track) async {
+    if (!isLoggedIn) return false;
     try {
-      await _dio.post('$_base/api/library/playlists/$id/tracks',
-          data: {'track': storedTrackFromTrack(track)},
-          options: _authOptions);
+      final countRes = await tursoExecuteOne(
+        _turso,
+        'SELECT COUNT(*) AS n FROM playlist_tracks WHERE playlist_id = ?',
+        [id],
+      );
+      final position = int.tryParse(countRes.firstValue('n')?.toString() ?? '0') ?? 0;
+
+      await tursoExecuteOne(
+        _turso,
+        'INSERT INTO playlist_tracks (playlist_id, track_id, position, data, created_at) '
+        'VALUES (?, ?, ?, ?, ?) '
+        'ON CONFLICT(playlist_id, track_id) DO NOTHING',
+        [
+          id,
+          track.addonTrackId ?? track.id,
+          position,
+          jsonEncode(storedTrackFromTrack(track)),
+          _now(),
+        ],
+      );
       return true;
     } catch (e) {
       print('[Account] addTrackToPlaylist error: $e');
@@ -342,9 +475,13 @@ class AccountService extends ChangeNotifier {
   }
 
   Future<bool> removeTrackFromPlaylist(int id, String trackId) async {
+    if (!isLoggedIn) return false;
     try {
-      await _dio.delete('$_base/api/library/playlists/$id/tracks',
-          queryParameters: {'trackId': trackId}, options: _authOptions);
+      await tursoExecuteOne(
+        _turso,
+        'DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?',
+        [id, trackId],
+      );
       return true;
     } catch (e) {
       print('[Account] removeTrackFromPlaylist error: $e');
@@ -352,23 +489,113 @@ class AccountService extends ChangeNotifier {
     }
   }
 
-  // ========== HELPERS ==========
+  // ========== ROW MAPPERS ==========
 
-  String _messageFrom(DioException e) {
-    final data = e.response?.data;
-    if (data is Map && data['error'] != null) {
-      return data['error'].toString();
-    }
-    switch (e.response?.statusCode) {
-      case 401:
-        return 'Credenciales inválidas';
-      case 409:
-        return 'Ese usuario o correo ya está registrado';
-      case 400:
-        return 'Datos inválidos';
-    }
-    return 'Error de red. Verifica tu conexión.';
+  AccountUser _userFromRow(Map<String, dynamic> row) {
+    return AccountUser(
+      id: int.tryParse(row['id']?.toString() ?? '') ?? 0,
+      username: row['username']?.toString() ?? '',
+      email: row['email']?.toString() ?? '',
+      role: row['role']?.toString() ?? 'user',
+      status: 'approved',
+      createdAt: row['created_at']?.toString(),
+    );
   }
+
+  FavoriteRow _favoriteFromRow(Map<String, dynamic> row) {
+    return FavoriteRow(
+      id: int.tryParse(row['id']?.toString() ?? '') ?? 0,
+      itemType: row['item_type']?.toString() ?? 'track',
+      itemId: row['item_id']?.toString() ?? '',
+      data: _parseJsonMap(row['data']),
+      createdAt: row['created_at']?.toString(),
+    );
+  }
+
+  UserPlaylist _playlistFromRow(Map<String, dynamic> row) {
+    return UserPlaylist(
+      id: int.tryParse(row['id']?.toString() ?? '') ?? 0,
+      name: row['name']?.toString() ?? 'Playlist',
+      description: row['description']?.toString() ?? '',
+      createdAt: row['created_at']?.toString(),
+    );
+  }
+
+  static Map<String, dynamic> _parseJsonMap(dynamic raw) {
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    if (raw is String && raw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+    }
+    return <String, dynamic>{};
+  }
+
+  // ========== CREDENTIALS HELPERS ==========
+
+  static String _randomSalt() {
+    final rnd = Random.secure();
+    return base64UrlEncode(List<int>.generate(16, (_) => rnd.nextInt(256)));
+  }
+
+  /// PBKDF2-HMAC-SHA256 (RFC 2898) implemented over package:crypto.
+  static Uint8List _pbkdf2(
+      String password, String salt, int iterations, int keyLength) {
+    final hmac = Hmac(sha256, utf8.encode(password));
+    final saltBytes = utf8.encode(salt);
+    final blocks = (keyLength + 31) ~/ 32;
+    final out = <int>[];
+
+    for (var block = 1; block <= blocks; block++) {
+      // U1 = PRF(password, salt || INT_32_BE(block))
+      final saltBlock = BytesBuilder()
+        ..add(saltBytes)
+        ..addByte((block >> 24) & 0xff)
+        ..addByte((block >> 16) & 0xff)
+        ..addByte((block >> 8) & 0xff)
+        ..addByte(block & 0xff);
+      var u = hmac.convert(saltBlock.toBytes()).bytes;
+
+      final acc = Uint8List.fromList(u);
+      for (var i = 1; i < iterations; i++) {
+        u = hmac.convert(u).bytes;
+        for (var j = 0; j < acc.length; j++) {
+          acc[j] ^= u[j];
+        }
+      }
+      out.addAll(acc);
+    }
+    return Uint8List.fromList(out.sublist(0, keyLength));
+  }
+
+  static String _hashPassword(String password, String salt) {
+    final bytes = _pbkdf2(password, salt, _pbkdf2Iterations, 32);
+    return base64Encode(bytes);
+  }
+
+  static bool _constantTimeEquals(String a, String b) {
+    final ab = a.codeUnits;
+    final bb = b.codeUnits;
+    var diff = ab.length ^ bb.length;
+    for (var i = 0; i < ab.length && i < bb.length; i++) {
+      diff |= ab[i] ^ bb[i];
+    }
+    return diff == 0;
+  }
+
+  // ========== LOCAL SESSION PERSISTENCE ==========
+
+  Future<void> _storeUser() async {
+    if (_user == null) return;
+    await _settings.setStoredUser(_user!.id, _user!.username);
+  }
+
+  Future<void> _clearStoredUser() async {
+    await _settings.clearStoredUser();
+  }
+
+  static String _now() => DateTime.now().toUtc().toIso8601String();
 }
 
 // ========== STORED TRACK MAPPING ==========

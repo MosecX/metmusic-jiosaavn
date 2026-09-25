@@ -11,7 +11,10 @@ import 'des_ecb.dart';
 String jioSaavnImage(String? url, {int size = 500}) {
   final u = url?.toString() ?? '';
   if (u.isEmpty) return u;
-  final scaled = u.replaceFirst(RegExp(r'\d+x\d+(?=\.jpg\$)'), '${size}x$size');
+  // NOTE: the $ anchor must stay unescaped inside this raw string —
+  // \$ would match a literal dollar sign and never match real URLs.
+  final scaled =
+      u.replaceFirst(RegExp(r'\d+x\d+(?=\.jpg$)'), '${size}x$size');
   return scaled;
 }
 

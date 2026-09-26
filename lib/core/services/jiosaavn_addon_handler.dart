@@ -69,6 +69,10 @@ class JioSaavnAddonHandler extends UserAddonHandler {
 
   // ========== Search ==========
 
+  /// Wide search: hits every catalog endpoint (songs / albums / artists /
+  /// playlists) in parallel with the raw query, then widens songs and albums
+  /// with an artist-only query so results like "The Weeknd" also surface
+  /// their tracks/albums even when the song search returns few matches.
   @override
   Future<AddonSearchResult?> search(String query) async {
     final queryCleaned = query.trim();
@@ -81,11 +85,38 @@ class JioSaavnAddonHandler extends UserAddonHandler {
       _searchPlaylistsRaw(queryCleaned),
     ]);
 
+    var tracks = results[0] as List<AddonTrack>;
+    var albums = results[1] as List<AddonAlbum>;
+    final artists = results[2] as List<AddonArtist>;
+    final playlists = results[3] as List<AddonPlaylist>;
+
+    // Widen: if a known artist matched by name, also pull their top songs and
+    // albums from the artist detail endpoint for broader discovery.
+    if (artists.isNotEmpty) {
+      final artistToken = artists.first.id;
+      try {
+        final detail = await getArtistDetail(artistToken);
+        if (detail != null) {
+          final extraTracks = (detail.topTracks ?? const <AddonTrack>[])
+              .where((t) =>
+                  !tracks.any((e) => e.id == t.id))
+              .toList();
+          final extraAlbums = (detail.albums ?? const <AddonAlbum>[])
+              .where((a) => !albums.any((e) => e.id == a.id))
+              .toList();
+          tracks = [...tracks, ...extraTracks.take(12)];
+          albums = [...albums, ...extraAlbums.take(12)];
+        }
+      } catch (_) {
+        // Widening is best-effort; the raw search results still stand.
+      }
+    }
+
     return AddonSearchResult(
-      tracks: results[0] as List<AddonTrack>,
-      albums: results[1] as List<AddonAlbum>,
-      artists: results[2] as List<AddonArtist>,
-      playlists: results[3] as List<AddonPlaylist>,
+      tracks: tracks,
+      albums: albums,
+      artists: artists,
+      playlists: playlists,
     );
   }
 
@@ -207,10 +238,13 @@ class JioSaavnAddonHandler extends UserAddonHandler {
   // ========== Stream ==========
 
   @override
-  Future<AddonStreamResult?> getStreamResult(String trackId) async {
+  Future<AddonStreamResult?> getStreamResult(String trackId,
+      {bool forceFresh = false}) async {
     // 1. Instant path: the song is already in the token cache (built while
     //    mapping search/detail rows) and carries an encrypted media URL.
-    var song = _songByToken[trackId];
+    //    [forceFresh] bypasses both the token cache and the stream cache —
+    //    used by the batch downloader's retry after a stale URL.
+    var song = forceFresh ? null : _songByToken[trackId];
 
     // 2. Fetch by token when unknown (e.g. downloaded/queued tracks built by
     //    another context) or when the cached copy can't be played.
@@ -229,7 +263,9 @@ class JioSaavnAddonHandler extends UserAddonHandler {
 
     // 3. Resolve the permanent CDN URL (320 → 160 → 96 → 48 → 12 kbps),
     //    retrying once with a fresh probe if an already-cached URL expired.
-    var stream = await _jioSaavn.resolveStream(song);
+    var stream = forceFresh
+        ? null
+        : await _jioSaavn.resolveStream(song);
     if (stream == null) {
       stream = await _jioSaavn.resolveStream(song, forceFresh: true);
     }

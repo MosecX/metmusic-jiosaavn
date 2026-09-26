@@ -15,6 +15,8 @@ import '../../core/models/addon_models.dart';
 import '../../core/utils/app_toast.dart';
 import '../shared/track_list_tile.dart';
 import '../shared/offline_banner.dart';
+import '../shared/batch_download_dialog.dart';
+import '../../core/services/download_manager_service.dart';
 import '../shared/player_shell.dart';
 
 class AlbumDetailScreen extends StatefulWidget {
@@ -191,6 +193,7 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
                           ),
                           onPressed: () => _toggleAlbumFavorite(album, tracks),
                         ),
+                        _AlbumDownloadButton(tracks: tracks),
                         IconButton(
                           icon: Container(
                             padding: const EdgeInsets.all(10),
@@ -313,6 +316,55 @@ class _BlurAura extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Download action next to the favourite button: shows aggregate state
+/// across the album (partial ring / green check) and opens the batch dialog.
+class _AlbumDownloadButton extends StatelessWidget {
+  final List<Track> tracks;
+
+  const _AlbumDownloadButton({required this.tracks});
+
+  @override
+  Widget build(BuildContext context) {
+    if (tracks.isEmpty) return const SizedBox.shrink();
+    final dm = context.watch<DownloadManagerService>();
+    final cs = Theme.of(context).colorScheme;
+
+    final downloaded = tracks.where((t) => dm.isDownloaded(t.id)).length;
+    final downloading = tracks.any((t) => dm.isDownloading(t.id));
+    final allDownloaded = downloaded == tracks.length;
+
+    return IconButton(
+      tooltip: 'Descargar álbum',
+      icon: allDownloaded
+          ? const Icon(Icons.download_done_rounded,
+              color: Colors.greenAccent, size: 28)
+          : Stack(
+              alignment: Alignment.center,
+              children: [
+                if (downloading || downloaded > 0)
+                  SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(
+                      value: downloaded / tracks.length,
+                      strokeWidth: 2,
+                      color: AppTheme.accent,
+                    ),
+                  ),
+                Icon(
+                  Icons.download_rounded,
+                  size: 26,
+                  color: downloaded > 0 || downloading
+                      ? AppTheme.accent
+                      : cs.onSurfaceVariant,
+                ),
+              ],
+            ),
+      onPressed: () => BatchDownloadDialog.show(context, List.of(tracks)),
     );
   }
 }

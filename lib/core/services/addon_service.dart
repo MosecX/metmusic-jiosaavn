@@ -258,8 +258,9 @@ class AddonService extends ChangeNotifier {
   }
 
   /// Resolve a full stream result (url + metadata) for a track.
+  /// [forceFresh] bypasses caches for the retry path of the batch downloader.
   Future<AddonStreamResult?> getStreamResult(String trackId,
-      {String? addonId}) async {
+      {String? addonId, bool forceFresh = false}) async {
     final id = addonId ?? _activeAddonId;
     if (id == null) return null;
 
@@ -267,7 +268,8 @@ class AddonService extends ChangeNotifier {
     if (manifest == null) return null;
 
     if (manifest.addonType == AddonType.user) {
-      return await _userHandlers[id]?.getStreamResult(trackId);
+      return await _userHandlers[id]?.getStreamResult(trackId,
+          forceFresh: forceFresh);
     } else {
       return _serverGetStreamResult(manifest, trackId);
     }

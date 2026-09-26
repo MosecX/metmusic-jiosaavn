@@ -18,8 +18,9 @@ abstract class UserAddonHandler {
   Future<AddonSearchResult?> search(String query);
 
   /// Resolve a playable stream URL for the given track ID.
-  /// Returns null if resolution fails.
-  Future<AddonStreamResult?> getStreamResult(String trackId);
+  /// Returns null if resolution fails. [forceFresh] bypasses caches.
+  Future<AddonStreamResult?> getStreamResult(String trackId,
+      {bool forceFresh = false});
 
   /// Fetch full album detail (tracks list). Returns null if not supported.
   Future<AddonAlbum?> getAlbumDetail(String albumId) async => null;

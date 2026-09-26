@@ -47,7 +47,11 @@ class _BatchDownloadDialogState extends State<BatchDownloadDialog> {
   bool _stopRequested = false;
 
   final Map<String, double> _trackProgress = {};
-  static const int _concurrency = 3;
+  /// Downloads run strictly one at a time: parallel requests to the JioSaavn
+  /// CDN (Azure Blob) get throttled/reset, which was failing ~6 tracks per
+  /// album. The quality probe adds up to 5 extra requests per track, so
+  /// sequential keeps every connection healthy.
+  static const int _concurrency = 1;
 
   @override
   void initState() {
@@ -98,51 +102,60 @@ class _BatchDownloadDialogState extends State<BatchDownloadDialog> {
         if (i >= _toDownload.length) return;
         final track = _toDownload[i];
 
-        try {
-          final streamResult = await addonService.getStreamResult(
-            track.addonTrackId ?? track.id,
-            addonId: track.addonId,
-          );
-          final url = streamResult?.url;
-          if (url == null) throw Exception('No stream URL');
-
+        // Two attempts: first with the normal (cached) stream URL, then with
+        // a freshly-resolved one in case the cached URL went stale or the
+        // quality probe had a transient network hiccup.
+        for (int attempt = 0; attempt < 2; attempt++) {
           if (_stopRequested || !mounted) return;
+          try {
+            final streamResult = await addonService.getStreamResult(
+              track.addonTrackId ?? track.id,
+              addonId: track.addonId,
+              forceFresh: attempt > 0,
+            );
+            final url = streamResult?.url;
+            if (url == null) throw Exception('No stream URL');
 
-          final ok = await dm.downloadTrack(
-            track: track,
-            streamUrl: url,
-            onProgress: (p) {
-              if (!mounted) return;
+            if (_stopRequested || !mounted) return;
+
+            final ok = await dm.downloadTrack(
+              track: track,
+              streamUrl: url,
+              onProgress: (p) {
+                if (!mounted) return;
+                setState(() {
+                  _trackProgress[track.id] = p;
+                  _aggregateProgress =
+                      (finishedProgress + _partialSum()) / (_total * 100) * 100;
+                });
+              },
+            );
+
+            if (!ok) throw Exception('Download failed');
+            if (mounted) {
               setState(() {
-                _trackProgress[track.id] = p;
-                _aggregateProgress =
-                    (finishedProgress + _partialSum()) / (_total * 100) * 100;
+                _completed++;
+                finishedProgress += 100;
               });
-            },
-          );
+            }
+            break; // success — no retry needed
+          } catch (e) {
+            print('[BatchDownload] ${track.title} (attempt ${attempt + 1}/2): $e');
+            if (attempt == 1 && mounted) {
+              setState(() => _failedTracks.add(track));
+            }
+          }
+        }
+        // Small breather between sequential downloads keeps the CDN happy.
+        await Future.delayed(const Duration(milliseconds: 300));
 
-          if (!ok) throw Exception('Download failed');
-          if (mounted) {
-            setState(() {
-              _completed++;
-              finishedProgress += 100;
-            });
-          }
-        } catch (e) {
-          print('[BatchDownload] ${track.title}: $e');
-          if (mounted) {
-            setState(() => _failedTracks.add(track));
-          }
-        } finally {
-          _trackProgress.remove(track.id);
-          if (mounted) {
-            setState(() {
-              _aggregateProgress =
-                  (finishedProgress + _partialSum()) / (_total * 100) * 100;
-              _statusMessage =
-                  '$_completed de $_total descargadas…';
-            });
-          }
+        _trackProgress.remove(track.id);
+        if (mounted) {
+          setState(() {
+            _aggregateProgress =
+                (finishedProgress + _partialSum()) / (_total * 100) * 100;
+            _statusMessage = '$_completed de $_total descargadas…';
+          });
         }
       }
     }

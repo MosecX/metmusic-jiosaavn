@@ -50,7 +50,8 @@ class LrcLibAddonHandler extends UserAddonHandler {
   Future<AddonSearchResult?> search(String query) async => null;
 
   @override
-  Future<AddonStreamResult?> getStreamResult(String trackId) async => null;
+  Future<AddonStreamResult?> getStreamResult(String trackId,
+      {bool forceFresh = false}) async => null;
 
   @override
   Future<String?> getLyrics(String artist, String title,

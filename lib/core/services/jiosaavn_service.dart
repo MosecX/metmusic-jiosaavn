@@ -77,9 +77,18 @@ class JioSaavnService {
     defaultValue: 'https://rthmx.vercel.app/api',
   );
 
+  /// Mirror deployment with the same ODSkyler spec. Used automatically when
+  /// the primary base fails (timeouts, 5xx, connection errors) so downloads
+  /// and playback keep working during primary outages.
+  static const String _fallbackBase =
+      'https://jiosaavn-api-lyart-eight.vercel.app/api';
+
   /// Public accessor so other services (e.g. [JioSaavnAddonHandler]) can hit
   /// the same API base for catalog/detail endpoints.
   static String get apiBase => _base;
+
+  /// Ordered list of bases: primary first, then the mirror.
+  static List<String> get _bases => [_base, _fallbackBase];
 
   static const List<int> _qualities = [320, 160, 96, 48, 12];
 
@@ -224,11 +233,7 @@ class JioSaavnService {
     String query, {
     bool useCache = true,
   }) async {
-    final res = await _dio.get(
-      '$_base/songs',
-      queryParameters: {'q': query},
-    );
-    final data = res.data;
+    final data = await _getJsonWithFallback('/songs', {'q': query});
     if (data is! Map || data['results'] is! List) return const [];
 
     final songs = <JioSaavnSong>[];
@@ -240,13 +245,26 @@ class JioSaavnService {
     return songs;
   }
 
+  /// GET against the primary base; on network/5xx failure retries against
+  /// the mirror. Returns the parsed JSON map or throws after both fail.
+  Future<dynamic> _getJsonWithFallback(
+      String path, Map<String, dynamic> params) async {
+    Object? lastError;
+    for (final base in _bases) {
+      try {
+        final res = await _dio.get('$base$path', queryParameters: params);
+        return res.data;
+      } catch (e) {
+        print('[JioSaavn] GET $base$path failed: $e — trying mirror…');
+        lastError = e;
+      }
+    }
+    throw lastError ?? Exception('All JioSaavn API bases failed');
+  }
+
   /// Fetches a single song's detail by its JioSaavn token.
   Future<JioSaavnSong?> songByToken(String token) async {
-    final res = await _dio.get(
-      '$_base/song',
-      queryParameters: {'token': token},
-    );
-    final data = res.data;
+    final data = await _getJsonWithFallback('/song', {'token': token});
     if (data is! Map) return null;
     return fromRawMap(Map<String, dynamic>.from(data));
   }

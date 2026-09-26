@@ -16,7 +16,6 @@ import '../../core/utils/app_toast.dart';
 import '../shared/track_list_tile.dart';
 import '../shared/offline_banner.dart';
 import '../shared/player_shell.dart';
-import '../shared/quality_badge.dart';
 
 class AlbumDetailScreen extends StatefulWidget {
   final String id;
@@ -273,7 +272,7 @@ class _AlbumDetailScreenState extends State<AlbumDetailScreen> {
         'title': album.title,
         'type': album.type,
         'releaseDate': album.year?.toString(),
-        'cover': coverUuidFromUrl(album.artworkURL),
+        'cover': coverUuidFromUrl(album.artworkURL ?? widget.initialArtwork),
         'artist': {'id': null, 'name': album.artist},
         'audioQuality': tracks.isNotEmpty ? _qualityOf(tracks.first) : 'LOSSLESS',
         'audioModes': _audioModesOf(tracks),
@@ -372,20 +371,6 @@ class _AlbumCover extends StatelessWidget {
                       ),
               ),
             ),
-            if (tracks.isNotEmpty)
-              Positioned(
-                bottom: 10,
-                right: 10,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.7),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: cs.outline, width: 0.5),
-                  ),
-                  child: QualityBadge(track: tracks.first),
-                ),
-              ),
           ],
         ),
       ),

@@ -163,12 +163,16 @@ class JioSaavnAddonHandler extends UserAddonHandler {
     try {
       final data = await _getJson('/artist', {'token': artistToken});
       final topTracks = _asList(data['topSongs']).map(_songFromRow).toList();
-      final albums =
-          _asList(data['topAlbums']).map(_albumFromRow).toList();
+      // topAlbums + singles both map to browsable album cards.
+      final albums = [
+        ..._asList(data['topAlbums']),
+        ..._asList(data['singles']),
+      ].map(_albumFromRow).toList();
       return AddonArtist(
         id: artistToken,
         name: data['name']?.toString() ?? 'Unknown Artist',
         artworkURL: jioSaavnImage(data['image']),
+        subtitle: data['subtitle']?.toString(),
         topTracks: topTracks,
         albums: albums,
         addonId: addonId,

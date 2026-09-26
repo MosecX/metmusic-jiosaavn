@@ -7,7 +7,6 @@ import '../shared/staggered_item.dart';
 import '../../core/services/addon_service.dart';
 import '../../core/models/models.dart';
 import '../../core/models/addon_models.dart';
-import '../shared/quality_badge.dart';
 import '../shared/track_list_tile.dart';
 import '../shared/offline_banner.dart';
 import '../import/playlist_import_dialog.dart';
@@ -562,8 +561,6 @@ class _HostingerAlbumCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final badge = albumBadgeQuality(album);
-
     return GestureDetector(
       onTap: () {
         Navigator.push(
@@ -622,12 +619,6 @@ class _HostingerAlbumCard extends StatelessWidget {
                           ),
                   ),
                 ),
-                if (badge != null)
-                  Positioned(
-                    top: AppTheme.space2,
-                    left: AppTheme.space2,
-                    child: QualityBadge.fromQuality(quality: badge),
-                  ),
               ],
             ),
             const SizedBox(height: AppTheme.space2),

@@ -9,8 +9,10 @@ import '../../core/services/account_service.dart';
 import '../../core/services/audio_player_service.dart';
 import '../../core/services/download_manager_service.dart';
 import '../../core/models/models.dart';
+import '../../core/services/jiosaavn_addon_handler.dart';
 import '../../core/utils/app_toast.dart';
-import 'quality_badge.dart';
+import '../album/album_detail_screen.dart';
+import '../artist/artist_detail_screen.dart';
 
 class TrackListTile extends StatelessWidget {
   final Track track;
@@ -106,7 +108,7 @@ class TrackListTile extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            QualityBadge(track: track),
+            _DownloadStateIcon(track: track),
           ],
         ),
         subtitle: Text(
@@ -136,6 +138,15 @@ class TrackListTile extends StatelessWidget {
                   child: Text(_isFavorite(context) ? 'Quitar de favoritos' : 'Favorito'),
                 ),
                 const PopupMenuItem(value: 'download', child: Text('Descargar')),
+                const PopupMenuDivider(),
+                if (_albumId != null)
+                  const PopupMenuItem(
+                    value: 'go_album',
+                    child: Text('Ir al álbum')),
+                if (_artistId != null)
+                  const PopupMenuItem(
+                    value: 'go_artist',
+                    child: Text('Ir al artista')),
                 if (onRemove != null)
                   PopupMenuItem(
                     value: 'remove',
@@ -255,10 +266,71 @@ class TrackListTile extends StatelessWidget {
       case 'add_playlist':
         _showPlaylistPicker(context);
         break;
+      case 'go_album':
+        if (_albumId != null) {
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => AlbumDetailScreen(
+              id: _albumId!,
+              addonId: track.addonId ?? JioSaavnAddonHandler.addonId,
+              initialTitle: track.albumTitle ?? '',
+              initialArtwork: track.albumCover,
+            ),
+          ));
+        }
+        break;
+      case 'go_artist':
+        if (_artistId != null) {
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => ArtistDetailScreen(
+              id: _artistId!,
+              addonId: track.addonId ?? JioSaavnAddonHandler.addonId,
+              initialTitle: track.artist,
+            ),
+          ));
+        }
+        break;
       case 'remove':
         onRemove?.call();
         break;
     }
+  }
+
+  /// Album token from the raw JioSaavn row (more_info.album_id), falling back
+  /// to the mapped Track field.
+  String? get _albumId {
+    final raw = track.rawData;
+    if (raw != null) {
+      final more = raw['more_info'];
+      if (more is Map) {
+        final id = more['album_id']?.toString();
+        if (id != null && id.isNotEmpty) return id;
+      }
+    }
+    final id = track.albumId;
+    return (id != null && id.isNotEmpty) ? id : null;
+  }
+
+  /// Artist token from the raw JioSaavn row (more_info.artists.primary),
+  /// falling back to the mapped Track field.
+  String? get _artistId {
+    final raw = track.rawData;
+    if (raw != null) {
+      final more = raw['more_info'];
+      if (more is Map) {
+        final artists = more['artists'];
+        if (artists is Map) {
+          final primary = artists['primary'];
+          if (primary is List && primary.isNotEmpty && primary.first is Map) {
+            final map = Map<String, dynamic>.from(primary.first as Map);
+            final token =
+                (map['token'] ?? map['artist_token'] ?? map['id'])?.toString();
+            if (token != null && token.isNotEmpty) return token;
+          }
+        }
+      }
+    }
+    final id = track.artistId;
+    return (id != null && id.isNotEmpty) ? id : null;
   }
 
   Future<void> _downloadTrack(BuildContext context) async {
@@ -396,6 +468,38 @@ class TrackListTile extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Small trailing indicator next to the title: a green check when the track
+/// is already downloaded, a progress ring while it's downloading, nothing
+/// otherwise.
+class _DownloadStateIcon extends StatelessWidget {
+  final Track track;
+
+  const _DownloadStateIcon({required this.track});
+
+  @override
+  Widget build(BuildContext context) {
+    final dm = context.watch<DownloadManagerService>();
+
+    if (dm.isDownloading(track.id)) {
+      final progress = dm.getProgress(track.id) ?? 0;
+      return SizedBox(
+        width: 16,
+        height: 16,
+        child: CircularProgressIndicator(
+          value: progress > 0 ? progress / 100 : null,
+          strokeWidth: 2,
+          color: AppTheme.accent,
+        ),
+      );
+    }
+    if (dm.isDownloaded(track.id)) {
+      return const Icon(Icons.download_done_rounded,
+          color: Colors.greenAccent, size: 18);
+    }
+    return const SizedBox.shrink();
   }
 }
 

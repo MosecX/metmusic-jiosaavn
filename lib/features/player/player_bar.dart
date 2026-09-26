@@ -12,7 +12,6 @@ import '../../core/models/models.dart';
 import '../lyrics/lyrics_screen.dart';
 import '../queue/queue_screen.dart';
 import '../artist/artist_detail_screen.dart';
-import '../shared/quality_badge.dart';
 import '../../core/utils/app_toast.dart';
 
 /// Player Bar - bottom player controls matching original exactly
@@ -900,9 +899,7 @@ class _ExpandedMobilePlayerState extends State<_ExpandedMobilePlayer>
                               maxLines: 2,
                             ),
                           ),
-                          const SizedBox(height: 6),
-                          QualityBadge(track: track),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 12),
                           GestureDetector(
                             onTap: track.artistId != null
                                 ? () {

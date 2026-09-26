@@ -10,6 +10,7 @@ import '../models/account_models.dart';
 import '../models/models.dart';
 import 'settings_service.dart';
 import 'jiosaavn_addon_handler.dart';
+import 'jiosaavn_service.dart' show jioSaavnImage;
 import 'turso_client.dart';
 
 /// Account service backed directly by the project's Turso (libSQL) database —
@@ -600,10 +601,17 @@ class AccountService extends ChangeNotifier {
 
 // ========== STORED TRACK MAPPING ==========
 
-/// Stored covers keep the JioSaavn CDN URL directly — no UUID indirection.
-String? coverUuidFromUrl(String? url) =>
-    (url == null || url.isEmpty) ? null : url;
+/// Stored covers keep the JioSaavn CDN URL directly — no UUID indirection —
+/// and are normalized to the 500x500 rendition when the URL carries a size
+/// token, so everything persisted in Turso points at high-res artwork.
+String? coverUuidFromUrl(String? url) {
+  final u = url?.toString() ?? '';
+  if (u.isEmpty) return null;
+  return jioSaavnImage(u, size: 500);
+}
 
+/// Reads a stored cover back. Everything persisted already points at the
+/// 500x500 rendition; the size param is kept for call-site compatibility.
 String coverUrlFromUuid(String? uuid, {int size = 640}) {
   if (uuid == null || uuid.isEmpty) return '';
   return uuid;

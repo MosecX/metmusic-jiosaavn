@@ -31,24 +31,6 @@ String? _firstArtistId(dynamic artists) {
   return null;
 }
 
-/// Quality string for the album badge: 'HI_RES_LOSSLESS' (Hi-Res),
-/// 'LOSSLESS', or null. Prefers the album-level audioQuality and falls back
-/// to its tracks when that is absent (e.g. album summaries that only carry a
-/// track list).
-String? albumBadgeQuality(AddonAlbum album) {
-  final aq = album.audioQuality;
-  if (aq != null && aq.isNotEmpty) return aq;
-  final tracks = album.tracks;
-  if (tracks != null && tracks.isNotEmpty) {
-    for (final t in tracks) {
-      final q = t.quality ?? '';
-      if (q.replaceAll('_', '').contains('HIRES')) return 'HI_RES_LOSSLESS';
-      if (q.contains('LOSSLESS')) return 'LOSSLESS';
-    }
-  }
-  return null;
-}
-
 /// Addon type: 'server' (Eclipse-spec HTTP server) or 'user' (device-side handler)
 enum AddonType { server, user }
 
@@ -332,6 +314,7 @@ class AddonArtist {
   final String id;
   final String name;
   final String? artworkURL;
+  final String? subtitle; // e.g. "Artist • 542549 Listeners"
   final List<String>? genres;
   final String? bio;
   final List<AddonTrack>? topTracks;
@@ -342,6 +325,7 @@ class AddonArtist {
     required this.id,
     required this.name,
     this.artworkURL,
+    this.subtitle,
     this.genres,
     this.bio,
     this.topTracks,
@@ -354,6 +338,7 @@ class AddonArtist {
       id: json['id']?.toString() ?? '',
       name: json['name'] ?? 'Unknown Artist',
       artworkURL: json['artworkURL'] ?? json['image'],
+      subtitle: json['subtitle']?.toString(),
       genres: json['genres'] != null
           ? List<String>.from(json['genres'])
           : null,

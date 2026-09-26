@@ -11,7 +11,6 @@ import '../../core/services/local_library_service.dart';
 import '../../core/services/account_service.dart';
 import '../../core/models/models.dart';
 import '../../core/models/addon_models.dart';
-import '../shared/quality_badge.dart';
 import '../../core/services/history_service.dart';
 import '../../core/services/download_manager_service.dart';
 import '../../core/utils/app_toast.dart';
@@ -637,8 +636,6 @@ class _HostingerAlbumCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final badge = albumBadgeQuality(album);
-
     return GestureDetector(
       onTap: () {
         Navigator.push(
@@ -700,12 +697,6 @@ class _HostingerAlbumCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (badge != null)
-                  Positioned(
-                    top: AppTheme.space2,
-                    left: AppTheme.space2,
-                    child: QualityBadge.fromQuality(quality: badge),
-                  ),
               ],
             ),
             const SizedBox(height: AppTheme.space2),

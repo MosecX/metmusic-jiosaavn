@@ -16,7 +16,6 @@ import '../shared/track_list_tile.dart';
 import '../shared/offline_banner.dart';
 import '../shared/player_shell.dart';
 import '../album/album_detail_screen.dart';
-import '../shared/quality_badge.dart';
 
 class ArtistDetailScreen extends StatefulWidget {
   final String id;
@@ -147,6 +146,7 @@ class _ArtistDetailScreenState extends State<ArtistDetailScreen> {
         artist.topTracks?.map((t) => trackFromAddonTrack(t)).toList() ?? [];
     final albums = artist.albums ?? [];
     final artworkUrl = artist.artworkURL ?? widget.initialArtwork;
+    final listeners = _listenersFromSubtitle(artist.subtitle);
 
     return Stack(
       children: [
@@ -188,6 +188,20 @@ class _ArtistDetailScreenState extends State<ArtistDetailScreen> {
                     ),
                   ),
 
+                  // Listeners line from the API subtitle
+                  // ("Artist • 542549 Listeners").
+                  if (listeners != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        '$listeners oyentes · ${topTracks.length} canciones · ${albums.length} álbumes',
+                        style: TextStyle(
+                          color: cs.onSurfaceVariant,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                    ),
+
                   const SizedBox(height: 24),
 
                   Padding(
@@ -201,6 +215,28 @@ class _ArtistDetailScreenState extends State<ArtistDetailScreen> {
                               .isFavorite('artist', artist.id),
                           onPressed: () => _toggleArtistFavorite(artist),
                         ),
+                        if (topTracks.length > 1)
+                          IconButton(
+                            tooltip: 'Aleatorio',
+                            icon: Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: cs.surfaceContainerHigh,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                    color: cs.outline, width: 1),
+                              ),
+                              child: Icon(Icons.shuffle_rounded,
+                                  color: cs.onSurface, size: 22),
+                            ),
+                            onPressed: () async {
+                              final player =
+                                  context.read<AudioPlayerService>();
+                              final shuffled = List.of(topTracks);
+                              shuffled.shuffle();
+                              await player.playAll(shuffled);
+                            },
+                          ),
                         if (topTracks.isNotEmpty)
                           IconButton(
                             icon: Container(
@@ -307,6 +343,25 @@ class _ArtistDetailScreenState extends State<ArtistDetailScreen> {
         ),
       ],
     );
+  }
+
+  /// "Artist • 542549 Listeners" → "542549" (formatted with thousands
+  /// separators for display).
+  static String? _listenersFromSubtitle(String? subtitle) {
+    if (subtitle == null) return null;
+    final m = RegExp(r'(\d[\d,\s]*)\s*Listeners?', caseSensitive: false)
+        .firstMatch(subtitle);
+    final raw = m?.group(1)?.replaceAll(RegExp(r'[\s,]'), '');
+    final n = int.tryParse(raw ?? '');
+    if (n == null) return null;
+    final s = n.toString();
+    final buf = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      buf.write(s[i]);
+      final remaining = s.length - 1 - i;
+      if (remaining > 0 && remaining % 3 == 0) buf.write('.');
+    }
+    return buf.toString();
   }
 
   Future<void> _toggleArtistFavorite(AddonArtist artist) async {
@@ -453,7 +508,6 @@ class _AlbumGridCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final badge = albumBadgeQuality(album);
     return GestureDetector(
       onTap: () {
         Navigator.push(
@@ -493,12 +547,6 @@ class _AlbumGridCard extends StatelessWidget {
                         )
                       : const Icon(Icons.album, size: 32),
                 ),
-                if (badge != null)
-                  Positioned(
-                    top: 6,
-                    right: 6,
-                    child: QualityBadge.fromQuality(quality: badge),
-                  ),
               ],
             ),
           ),

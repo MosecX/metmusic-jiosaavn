@@ -9,10 +9,13 @@ import '../../core/services/audio_player_service.dart';
 import '../../core/models/models.dart';
 import '../../core/models/account_models.dart';
 import '../../core/services/addon_service.dart';
+import '../../core/services/download_manager_service.dart';
+import '../../core/models/addon_models.dart';
 import '../shared/track_list_tile.dart';
 import '../shared/offline_banner.dart';
 import '../downloads/downloads_screen.dart';
 import '../auth/auth_screen.dart';
+import '../shared/batch_download_dialog.dart';
 import '../album/album_detail_screen.dart';
 import '../artist/artist_detail_screen.dart';
 import '../../core/utils/app_toast.dart';
@@ -172,17 +175,42 @@ class _LibraryScreenState extends State<LibraryScreen> {
       );
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(AppTheme.space6),
-      itemCount: tracks.length,
-      itemBuilder: (context, index) => StaggeredItem(
-        index: index,
-        child: TrackListTile(
-          track: tracks[index],
-          tracks: tracks,
-          index: index,
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+              AppTheme.space6, AppTheme.space4, AppTheme.space6, 0),
+          child: Row(
+            children: [
+              Text(
+                '${tracks.length} canciones',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: () =>
+                    BatchDownloadDialog.show(context, List.of(tracks)),
+                icon: const Icon(Icons.download_rounded, size: 20),
+                label: const Text('Descargar todo'),
+              ),
+            ],
+          ),
         ),
-      ),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(AppTheme.space6),
+            itemCount: tracks.length,
+            itemBuilder: (context, index) => StaggeredItem(
+              index: index,
+              child: TrackListTile(
+                track: tracks[index],
+                tracks: tracks,
+                index: index,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -423,13 +451,26 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   ],
                 ),
               ),
-              if (_playlistTracks != null && _playlistTracks!.isNotEmpty)
+              if (_playlistTracks != null && _playlistTracks!.isNotEmpty) ...[
+                IconButton(
+                  tooltip: 'Descargar playlist',
+                  icon: Icon(
+                    Icons.download_rounded,
+                    size: 28,
+                    color: _playlistFullyDownloaded
+                        ? Colors.greenAccent
+                        : cs.onSurface,
+                  ),
+                  onPressed: () => BatchDownloadDialog.show(
+                      context, List.of(_playlistTracks!)),
+                ),
                 IconButton(
                   icon: const Icon(Icons.play_circle_fill),
                   iconSize: 50,
                   color: cs.primary,
                   onPressed: () => player.playAll(_playlistTracks!),
                 ),
+              ],
             ],
           ),
           const SizedBox(height: 20),
@@ -494,6 +535,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
       context.read<NavigationService>().clearBackHandler();
     } catch (_) {}
     _loadPlaylists();
+  }
+
+  /// True when every track of the open playlist is already on disk.
+  bool get _playlistFullyDownloaded {
+    final tracks = _playlistTracks;
+    if (tracks == null || tracks.isEmpty) return false;
+    final dm = context.read<DownloadManagerService>();
+    return tracks.every((t) => dm.isDownloaded(t.id));
   }
 
   Future<void> _removeTrackFromPlaylist(Track track) async {
@@ -730,12 +779,26 @@ class _FavGrid extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.vertical(top: Radius.circular(AppTheme.radiusDefault)),
-                          child: _FavCover(
-                            row: row,
-                            addonService: context.read<AddonService>(),
-                          ),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.vertical(
+                                  top: Radius.circular(AppTheme.radiusDefault)),
+                              child: _FavCover(
+                                row: row,
+                                addonService: context.read<AddonService>(),
+                              ),
+                            ),
+                            // Download button for favourite albums — fetches
+                            // the album detail and batch-downloads its tracks.
+                            if (row.itemType == 'album')
+                              Positioned(
+                                top: 6,
+                                right: 6,
+                                child: _FavAlbumDownloadButton(row: row),
+                              ),
+                          ],
                         ),
                       ),
                       Padding(
@@ -770,6 +833,103 @@ class _FavGrid extends StatelessWidget {
             ),
             );
           },
+        );
+      },
+    );
+  }
+}
+
+/// Small circular button overlaid on favourite album covers. Fetches the
+/// album detail (with tracks) and opens the batch download dialog.
+class _FavAlbumDownloadButton extends StatefulWidget {
+  final FavoriteRow row;
+
+  const _FavAlbumDownloadButton({required this.row});
+
+  @override
+  State<_FavAlbumDownloadButton> createState() =>
+      _FavAlbumDownloadButtonState();
+}
+
+class _FavAlbumDownloadButtonState extends State<_FavAlbumDownloadButton> {
+  bool _busy = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final dm = context.watch<DownloadManagerService>();
+    final cs = Theme.of(context).colorScheme;
+
+    if (_busy) {
+      return Container(
+        width: 32,
+        height: 32,
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.65),
+          shape: BoxShape.circle,
+        ),
+        child: const CircularProgressIndicator(strokeWidth: 2),
+      );
+    }
+
+    return FutureBuilder<AddonAlbum?>(
+      future: context
+          .read<AddonService>()
+          .getAlbumDetail(widget.row.itemId, addonId: _kAddonId),
+      builder: (context, snapshot) {
+        final tracks = snapshot.data?.tracks
+                ?.map((t) => trackFromAddonTrack(t))
+                .toList() ??
+            const <Track>[];
+        final downloadedCount = tracks.where((t) => dm.isDownloaded(t.id)).length;
+        final allDownloaded =
+            tracks.isNotEmpty && downloadedCount == tracks.length;
+
+        return InkWell(
+          onTap: tracks.isEmpty || _busy
+              ? null
+              : () async {
+                  setState(() => _busy = true);
+                  try {
+                    await BatchDownloadDialog.show(context, tracks);
+                  } finally {
+                    if (mounted) setState(() => _busy = false);
+                  }
+                },
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.65),
+              shape: BoxShape.circle,
+            ),
+            child: allDownloaded
+                ? const Icon(Icons.download_done_rounded,
+                    color: Colors.greenAccent, size: 18)
+                : Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      if (downloadedCount > 0 && tracks.isNotEmpty)
+                        SizedBox(
+                          width: 26,
+                          height: 26,
+                          child: CircularProgressIndicator(
+                            value: downloadedCount / tracks.length,
+                            strokeWidth: 2,
+                            color: AppTheme.accent,
+                          ),
+                        ),
+                      Icon(
+                        Icons.download_rounded,
+                        size: 18,
+                        color: downloadedCount > 0
+                            ? AppTheme.accent
+                            : Colors.white,
+                      ),
+                    ],
+                  ),
+          ),
         );
       },
     );

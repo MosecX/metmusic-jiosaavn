@@ -1,5 +1,4 @@
 import 'package:flutter/foundation.dart'; // For kIsWeb
-import 'dart:async'; // unawaited
 import 'dart:io';
 import 'package:media_kit/media_kit.dart'; // MediaKit.ensureInitialized()
 import 'package:flutter/material.dart';
@@ -29,7 +28,6 @@ import 'core/services/jiosaavn_addon_handler.dart';
 import 'core/services/local_library_service.dart';
 import 'core/services/navigation_service.dart';
 import 'core/utils/platform_helper.dart';
-import 'core/utils/high_refresh_rate.dart';
 
 void main() async {
   try {
@@ -137,14 +135,6 @@ void main() async {
         systemNavigationBarContrastEnforced: false,
       ),
     );
-
-    // Unlock high refresh rates (90/120/144 Hz) on capable Android devices.
-    // Flutter defaults to the lowest display mode; requesting the widest
-    // supported frame interval lets the panel run at its native rate.
-    if (!kIsWeb && PlatformHelper.isAndroid) {
-      unawaited(SystemChrome.setPreferredOrientations([]));
-      AndroidDisplayModeLimiter.unlockHighRefreshRate();
-    }
 
     runApp(
       MultiProvider(

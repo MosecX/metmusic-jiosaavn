@@ -35,25 +35,25 @@ class MainActivity : FlutterActivity() {
 
     /** Picks the supported display mode with the highest refresh rate. */
     private fun setHighRefreshRate(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return false
         return try {
             val display: Display? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 (getSystemService(DISPLAY_SERVICE) as DisplayManager)
                     .getDisplay(Display.DEFAULT_DISPLAY)
             } else {
+                @Suppress("DEPRECATION")
                 window.windowManager.defaultDisplay
-            } ?: return false
+            }
+            val d = display ?: return false
 
-            val modes = display.supportedModes
+            val modes = d.supportedModes
             if (modes.isEmpty()) return false
 
             // Highest refresh rate wins; tie-break on resolution for safety.
             val best = modes.maxWithOrNull(
                 compareBy({ it.refreshRate }, { it.physicalWidth })
             ) ?: return false
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                window.attributes.preferredDisplayModeId = best.modeId
-            }
+            window.attributes.preferredDisplayModeId = best.modeId
+            window.setAttributes(window.attributes)
             true
         } catch (e: Exception) {
             false
